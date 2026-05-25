@@ -1,0 +1,27 @@
+[package]
+name = "cachebar"
+version = "0.1.0"
+description = "A standalone menu-bar system cache utility"
+authors = ["CacheBar"]
+edition = "2021"
+rust-version = "1.78"
+
+[build-dependencies]
+tauri-build = { version = "=2.0.0", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+image = "=0.25.2"
+plist = "=1.7.0"
+serde_with = "=3.11.0"
+tauri = { version = "=2.0.0", features = ["tray-icon", "image-png"] }
+tauri-codegen = "=2.0.0"
+tauri-macros = "=2.0.0"
+tauri-plugin = "=2.0.0"
+tauri-plugin-dialog = "=2.0.0"
+tauri-plugin-fs = "=2.0.0"
+tauri-runtime = "=2.0.0"
+tauri-runtime-wry = "=2.0.0"
+tauri-utils = "=2.0.0"
+time = "=0.3.36"

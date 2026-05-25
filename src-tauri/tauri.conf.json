@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CacheBar",
+  "version": "0.1.0",
+  "identifier": "com.cachebar.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "CacheBar",
+        "width": 430,
+        "height": 760,
+        "visible": false,
+        "skipTaskbar": true,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "transparent": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ],
+    "resources": [
+      "icons/icon.png"
+    ]
+  }
+}

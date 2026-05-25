@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 34px;
+  background: transparent;
+}
+
+:root {
+  color: #10201b;
+  background: transparent;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.cachebar-shell {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(191, 219, 254, 0.36) transparent;
+  clip-path: inset(0 round 32px);
+}
+
+.cachebar-shell::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cachebar-shell::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cachebar-shell::-webkit-scrollbar-thumb {
+  background: rgba(191, 219, 254, 0.28);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
