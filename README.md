@@ -1,91 +1,53 @@
-# CacheBar
+<p align="center">
+  <img src="src-tauri/icons/icon.png" alt="CacheBar logo" width="96" height="96" />
+</p>
 
-A lightweight macOS menu bar utility that combines real-time system monitoring with one-click cache cleanup. Built with Tauri 2 (Rust) + React + TailwindCSS.
+<h1 align="center">CacheBar</h1>
 
-CacheBar lives in your menu bar. Click the tray icon and a frameless, translucent panel slides down with a card-based dashboard inspired by iStat Menus — CPU activity, disk usage with I/O rates, RAM breakdown, fan RPM, network throughput — plus tabs for safe cache cleanup and folder size analysis.
+<p align="center">
+  A lightweight macOS menu bar utility for real-time system monitoring and safe cache cleanup.<br />
+  Built with Tauri 2 (Rust) + React + Tailwind CSS.
+</p>
+
+Click the menu bar icon to open a rounded, translucent panel: **Overview** shows CPU, disk, memory, network, and top processes; **Cleanup** scans categorized safe-to-remove caches with review before delete.
 
 ## Features
 
-- **Menu bar panel**: tray icon toggles a transparent, always-on-top panel; auto-hides on focus loss.
-- **Overview tab** (card grid)
-  - **CPU**: brand string (e.g. `Apple M2`), live SVG stacked area chart of User / System / Idle over the last 60 samples, and the current CPU die temperature.
-  - **Disk**: root volume with `Used X / Total Y` (no misleading `U:` / `T:` shorthand), free space, usage bar, live read / write throughput, and optional disk temperature.
-  - **RAM**: used / total / available / cached, with a `Free Up` shortcut that runs the optimize task.
-  - **Fan**: current RPM, or `-- RPM` with a hint when SMC data is unavailable.
-  - **Internet**: live ↓ / ↑ throughput plus the active IP / interface.
-- **Cleanup tab**: scan for safe cache candidates (`scan_clean_targets`), review by category, multi-select, then delete via `clean_selected`. The list is always shown — nothing is deleted without an explicit click.
-- **Analyse tab**: pick any folder, walk it, and explore an expandable size tree.
-- **Bottom menu**: `Refresh` (⌘R), `Settings…` (⌘,), `About CacheBar`, `Quit` (⌘Q).
-- **Settings**: refresh interval and a switch for SMC-based temperature / fan sampling (persisted to `localStorage`).
-- **Privacy & safety**: every destructive action goes through a confirm dialog; cache scans return paths first so you can review before deletion.
+- **Menu bar panel** — tray icon toggles a frameless panel; auto-hides on focus loss (disabled during scan/delete and while modals are open).
+- **Overview**
+  - **CPU** — brand string, live stacked area chart (User / System / Idle), total usage %.
+  - **Disk** — root volume `Used / Total`, usage bar, live read/write rates (APFS-aware used space).
+  - **Memory** — used / total / available / cached; **Free Up** runs optimize tasks.
+  - **Network** — live ↓ / ↑ throughput, active IP and interface.
+  - **Top processes** — top 5 by CPU % with bar indicators.
+- **Cleanup** — mole-style sections and categories (safe / review), expandable items, multi-select, sticky delete bar, post-clean summary.
+- **Bottom menu** — Refresh (⌘R), Settings… (⌘,), About CacheBar, Quit (⌘Q).
+- **Settings** — refresh interval (persisted in `localStorage`).
+- **Safety** — destructive actions require confirmation; cache paths are scanned first for review.
 
-## Architecture
+## Install (macOS)
 
-```
-+-----------------------------+         +--------------------------+
-|        React + Vite         |  invoke |        Tauri (Rust)      |
-|  src/App.tsx                |<------->|  src-tauri/src/main.rs   |
-|  - TabBar / Overview        |         |  - tray + window toggle  |
-|  - CPU SVG ring buffer (60) |         |  - command bindings      |
-|  - Cleanup / Analyse views  |         +-----------+--------------+
-|  - Settings / About modals  |                     |
-+--------------+--------------+                     v
-               ^                          +--------------------------+
-               |  status / clean / ...    |   src-tauri/src/core/    |
-               +--------------------------|  status.rs   - sampler   |
-                                          |  clean.rs    - cache     |
-                                          |  analyse.rs  - du tree   |
-                                          |  optimize.rs - maint.    |
-                                          |  uninstall.rs - app rm   |
-                                          +--------------------------+
-```
+### Download DMG (recommended)
 
-### Frontend (`src/`)
+A pre-built **Apple Silicon** (`aarch64`) DMG is hosted on Baidu Netdisk:
 
-- `App.tsx` – single-file React entry point. Holds the global status snapshot, a `useRef`-backed 60-point CPU ring buffer, tab state, and `localStorage`-persisted settings.
-- `styles.css` – Tailwind directives and transparent-window resets (no rounded edges on `html`/`body`/`#root` to avoid the "frame square" artifact).
-- `main.tsx` / `index.html` – Vite bootstrap.
+| | |
+| --- | --- |
+| **Link** | https://pan.baidu.com/s/17yo_XLAvbdwwbPXkchyIuw?pwd=frog |
+| **提取码** | `frog` |
 
-### Backend (`src-tauri/src/`)
+**Steps**
 
-- `main.rs` – Tauri app: tray icon, panel positioning under the tray, auto-hide on focus loss, and `#[tauri::command]` bindings (`status`, `scan_clean_targets`, `clean_selected`, `uninstall`, `optimize`, `analyse`, `quit_app`, `set_panel_auto_hide`).
-- `core/status.rs` – stateful sampler held in a `OnceLock<Mutex<SamplerState>>`. Computes per-call rates by diffing against the previous sample.
-  - CPU: `top -l 1 -n 0` → `% user / % sys / % idle`.
-  - RAM: `sysctl hw.memsize` + `vm_stat` (and `/proc/meminfo` on Linux).
-  - Disk usage: `df -kP`; per-disk I/O via `iostat -Id <dev> 1 1`.
-  - Network: `ipconfig getifaddr` + `netstat -ibn` (`/proc/net/*` on Linux).
-  - Power: `pmset -g batt`.
-  - Temperature / fan (best-effort): `powermetrics --samplers smc,thermal`. Requires root; on failure the sampler disables itself and returns `None`, so the UI gracefully shows `--℃` / `-- RPM`.
-- `core/clean.rs` – returns a list of safe cleanup candidates (user caches, logs, etc.) so the UI can let the user review before deleting.
-- `core/analyse.rs` – recursive directory walk that emits an `AnalysisNode` tree sized for the UI.
-- `core/optimize.rs` – low-risk maintenance tasks (e.g. flushing filesystem caches).
-- `core/uninstall.rs` – removes an `.app` together with its leftover support files.
+1. Open the link above and download `CacheBar_0.1.0_aarch64.dmg` (or the latest DMG in the share).
+2. Double-click the DMG, then drag **CacheBar.app** into **Applications**.
+3. **First launch** — if macOS shows an unidentified-developer warning:
+   - Open **System Settings → Privacy & Security**, click **Open Anyway**, or
+   - Right-click **CacheBar.app** in Applications → **Open**.
+4. Click the **CacheBar** icon in the menu bar (rounded app icon) to show or hide the panel.
 
-### Data flow
+> Requires **macOS 11+** on Apple Silicon. Intel Macs need a separate build (`x86_64`); see [Building a DMG](#building-a-dmg) below.
 
-```
-tray click ──► toggle panel
-panel mount ──► invoke("status") every N s
-                        │
-                        ▼
-                SamplerState (Mutex)
-                  - diff net / disk counters
-                  - cache temp / fan (30s TTL)
-                        │
-                        ▼
-                StatusSnapshot ──► React state
-                                    │
-                                    ├─► CPU ring buffer (60)
-                                    └─► Cards (CPU / Disk / RAM / Fan / Net)
-```
-
-## Requirements
-
-- macOS 11+ (Apple Silicon or Intel) for the primary build target. Linux and Windows build cleanly but the menu-bar UX and SMC sampling are macOS-specific.
-- Node.js 18+ and npm
-- Rust toolchain (stable) and Xcode command-line tools (`xcode-select --install`)
-
-## Getting started
+### Build from source
 
 ```bash
 git clone https://github.com/ingeniousfrog/CacheBar.git
@@ -94,18 +56,24 @@ npm install
 npm run tauri dev
 ```
 
-`npm run tauri dev` starts Vite on `http://localhost:1420` and launches the Tauri shell. Click the tray icon (a small `C` glyph) in the menu bar to toggle the panel.
+`npm run tauri dev` starts Vite and the Tauri shell. Use the tray icon to toggle the panel.
 
-### Useful scripts
+## Requirements
+
+- macOS 11+ (Apple Silicon recommended for the pre-built DMG)
+- Node.js 18+ and npm (development only)
+- Rust stable + Xcode Command Line Tools (`xcode-select --install`) (development only)
+
+## Useful scripts
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Vite dev server only (for UI iteration in the browser). |
-| `npm run build` | Type-check and build the React bundle into `dist/`. |
+| `npm run dev` | Vite dev server only (UI in browser). |
+| `npm run build` | Type-check and build the React bundle to `dist/`. |
 | `npm run tauri dev` | Hot-reload Tauri app + Vite. |
-| `npm run tauri build` | Build a release binary and bundle installers. |
+| `npm run tauri build` | Release binary and installers. |
 
-### Keyboard shortcuts
+## Keyboard shortcuts
 
 | Shortcut | Action |
 | --- | --- |
@@ -113,79 +81,64 @@ npm run tauri dev
 | ⌘, | Open Settings |
 | ⌘Q | Quit CacheBar |
 
-### Enabling temperature / fan readings
+## Architecture
 
-`powermetrics` needs root privileges. By default the panel will show `--℃` / `-- RPM`. To enable the readings:
-
-```bash
-sudo /Applications/CacheBar.app/Contents/MacOS/CacheBar
+```
++-----------------------------+         +--------------------------+
+|        React + Vite         |  invoke |        Tauri (Rust)      |
+|  src/App.tsx                |<------->|  src-tauri/src/main.rs   |
+|  - Overview / Cleanup tabs  |         |  - tray + window toggle  |
+|  - CPU history (60 samples) |         |  - command bindings      |
++--------------+--------------+         +-----------+--------------+
+               ^                                    |
+               |  status / clean / …                v
+               +--------------------------+  src-tauri/src/core/
+                                          status.rs, clean.rs, …
 ```
 
-…or, during development:
+### Backend highlights (`src-tauri/src/core/`)
 
-```bash
-sudo npm run tauri dev
-```
-
-Once the first `powermetrics` invocation succeeds the values are cached and refreshed every 30 s.
+- **`status.rs`** — CPU (`top`), RAM (`sysctl` / `vm_stat`), disk (`df` + `iostat`), network (`netstat`), top processes; stateful rate sampling.
+- **`clean.rs`** — categorized scan (`CleanScanResult`), safe path whitelist, APFS snapshot handling.
+- **`optimize.rs`** — maintenance tasks (e.g. cache purge).
+- **`tray_icon.rs`** — rounded menu-bar tray icon generation.
 
 ## Building a DMG
-
-The DMG installer is produced by Tauri's bundler.
 
 ```bash
 npm install
 npm run tauri build -- --bundles dmg
 ```
 
-The first build takes 5–15 minutes because every Rust dependency is compiled in release mode. Subsequent builds are incremental.
+First release build may take several minutes. Output (typical paths):
 
-Output locations (relative to the repo root):
-
-- `src-tauri/target/release/bundle/dmg/CacheBar_0.1.0_aarch64.dmg` (Apple Silicon)
+- `src-tauri/target/release/bundle/dmg/CacheBar_0.1.0_aarch64.dmg`
 - `src-tauri/target/release/bundle/macos/CacheBar.app`
 
-To build a universal binary (`x86_64` + `aarch64`) instead, install both Rust targets first and pass `--target universal-apple-darwin`:
+Universal binary (`x86_64` + `aarch64`):
 
 ```bash
 rustup target add x86_64-apple-darwin aarch64-apple-darwin
 npm run tauri build -- --target universal-apple-darwin --bundles dmg
 ```
 
-### Notes
-
-- For distribution, sign and notarize the `.app` before bundling the DMG. Set `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` in your environment and let `tauri build` handle the rest.
-- Bundle targets: pass `--bundles dmg` (DMG only), `--bundles app` (just the `.app`), or omit the flag to build everything declared in `tauri.conf.json`.
-- The Cargo mirror configured in `.cargo/config.toml` (Tsinghua) makes the first Rust compile much faster from mainland China; remove the file if you prefer crates.io directly.
+For distribution outside personal use, sign and notarize the `.app` before sharing the DMG.
 
 ## Project layout
 
 ```
 CacheBar/
-├── index.html                # Vite entry
-├── package.json              # Frontend deps & scripts
-├── tailwind.config.js
-├── postcss.config.js
-├── tsconfig.json
-├── vite.config.ts
 ├── src/
-│   ├── App.tsx               # All UI lives here (tabs, cards, modals)
+│   ├── App.tsx           # UI (Overview, Cleanup, modals)
 │   ├── main.tsx
 │   └── styles.css
 ├── src-tauri/
-│   ├── Cargo.toml
-│   ├── tauri.conf.json       # Window / bundle config
-│   ├── icons/                # Tray & app icons
-│   ├── capabilities/         # Tauri ACLs
+│   ├── icons/icon.png    # App & tray source icon (shown above)
+│   ├── tauri.conf.json
 │   └── src/
-│       ├── main.rs           # Tray + commands
+│       ├── main.rs
+│       ├── tray_icon.rs
 │       └── core/
-│           ├── mod.rs        # Shared structs / CoreResult
-│           ├── status.rs     # Sampler & metrics
-│           ├── clean.rs
-│           ├── analyse.rs
-│           ├── optimize.rs
-│           └── uninstall.rs
 └── README.md
 ```
 
