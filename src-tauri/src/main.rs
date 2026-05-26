@@ -13,31 +13,83 @@ struct PanelState {
     auto_hide: AtomicBool,
 }
 
-/// Round the macOS NSWindow's content layer so the four corners outside the
-/// rounded-rect panel are clipped at the OS level. Without this the window is
-/// a rectangle and the four transparent corners leak whatever desktop / app
-/// content sits behind the panel.
+/// Panel corner radius — keep in sync with `rounded-[26px]` in App.tsx / styles.css.
 #[cfg(target_os = "macos")]
-fn round_macos_window(window: &tauri::WebviewWindow<Wry>, radius: f64) {
+const PANEL_CORNER_RADIUS: f64 = 26.0;
+
+/// Clip the native window + WKWebView to a rounded rect so corner pixels are not
+/// the default white WKWebView background. Requires `macOSPrivateApi` in
+/// tauri.conf.json and the `macos-private-api` Cargo feature.
+#[cfg(target_os = "macos")]
+fn round_macos_window(window: &tauri::WebviewWindow<Wry>) {
+    use cocoa::appkit::NSColor;
     use cocoa::base::{id, nil, NO, YES};
-    use objc::{msg_send, sel, sel_impl};
+    use cocoa::foundation::NSString;
+    use objc::{class, msg_send, sel, sel_impl};
+    use tauri::utils::config::WindowEffectsConfig;
+    use tauri::window::{Effect, EffectState};
+
+    let _ = window.set_effects(Some(WindowEffectsConfig {
+        effects: vec![Effect::WindowBackground],
+        state: Some(EffectState::Active),
+        radius: Some(PANEL_CORNER_RADIUS),
+        color: None,
+    }));
 
     let Ok(ns_window_ptr) = window.ns_window() else {
         return;
     };
     let ns_window = ns_window_ptr as id;
+    let radius = PANEL_CORNER_RADIUS;
+
     unsafe {
         let _: () = msg_send![ns_window, setOpaque: NO];
-        let _: () = msg_send![ns_window, setBackgroundColor: nil];
+        let _: () = msg_send![ns_window, setBackgroundColor: NSColor::clearColor(nil)];
         let _: () = msg_send![ns_window, setHasShadow: YES];
 
         let content_view: id = msg_send![ns_window, contentView];
-        let _: () = msg_send![content_view, setWantsLayer: YES];
-        let layer: id = msg_send![content_view, layer];
-        if layer != nil {
-            let _: () = msg_send![layer, setCornerRadius: radius];
-            let _: () = msg_send![layer, setMasksToBounds: YES];
+        round_macos_view_tree(content_view, radius);
+    }
+
+    let _ = window.with_webview(move |platform_webview| {
+        let webview = platform_webview.inner() as id;
+        if webview.is_null() {
+            return;
         }
+        unsafe {
+            let _: () = msg_send![webview, setOpaque: NO];
+            let no: id = msg_send![class!(NSNumber), numberWithBool:0];
+            let draws_key = NSString::alloc(nil).init_str("drawsBackground");
+            let _: () = msg_send![webview, setValue:no forKey:draws_key];
+            round_macos_view_tree(webview, radius);
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn round_macos_view_tree(view: cocoa::base::id, radius: f64) {
+    use cocoa::appkit::NSColor;
+    use cocoa::base::{id, nil, YES};
+    use objc::{msg_send, sel, sel_impl};
+
+    if view == nil {
+        return;
+    }
+
+    let _: () = msg_send![view, setWantsLayer: YES];
+    let layer: id = msg_send![view, layer];
+    if layer != nil {
+        let _: () = msg_send![layer, setCornerRadius: radius];
+        let _: () = msg_send![layer, setMasksToBounds: YES];
+        let clear: id = msg_send![NSColor::clearColor(nil), CGColor];
+        let _: () = msg_send![layer, setBackgroundColor: clear];
+    }
+
+    let subviews: id = msg_send![view, subviews];
+    let count: usize = msg_send![subviews, count];
+    for index in 0..count {
+        let child: id = msg_send![subviews, objectAtIndex: index];
+        round_macos_view_tree(child, radius);
     }
 }
 
@@ -134,7 +186,7 @@ fn main() {
 
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]
-                round_macos_window(&window, 26.0);
+                round_macos_window(&window);
 
                 let panel = window.clone();
                 let app_handle = app.handle().clone();
@@ -191,6 +243,8 @@ fn toggle_panel(app: &AppHandle<Wry>, position: PhysicalPosition<f64>) {
     }
 
     let _ = window.set_position(PhysicalPosition::new(x, y));
+    #[cfg(target_os = "macos")]
+    round_macos_window(&window);
     let _ = window.show();
     let _ = window.set_focus();
 }

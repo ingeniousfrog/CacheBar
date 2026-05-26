@@ -119,7 +119,7 @@ type AppSettings = {
 };
 
 const APP_VERSION = "0.1.0";
-const GITHUB_URL = "https://github.com/heqk/CacheBar";
+const GITHUB_URL = "https://github.com/ingeniousfrog/CacheBar";
 const SETTINGS_KEY = "cachebar-settings";
 const CPU_HISTORY_LEN = 60;
 
@@ -1187,8 +1187,8 @@ export default function App() {
   }, [status?.collected_at]);
 
   return (
-    <main className="h-screen w-screen overflow-hidden bg-transparent text-white">
-      <div className="cachebar-shell flex h-full flex-col gap-2 overflow-hidden rounded-[26px] bg-slate-900/85 p-3 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-2xl">
+    <main className="h-screen w-screen overflow-hidden rounded-[26px] bg-[#0f172a] text-white">
+      <div className="cachebar-shell flex h-full flex-col gap-2 overflow-hidden rounded-[26px] bg-slate-900 p-3 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ring-1 ring-white/10">
         <header className="flex items-center justify-between gap-2 px-1 pt-0.5">
           <h1 className="text-[13px] font-bold tracking-tight text-white">CacheBar</h1>
           <span className="truncate text-[10px] font-medium text-slate-500">

@@ -11,6 +11,7 @@
   },
   "app": {
     "withGlobalTauri": false,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -22,7 +23,12 @@
         "decorations": false,
         "resizable": false,
         "alwaysOnTop": true,
-        "transparent": true
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["windowBackground"],
+          "radius": 26,
+          "state": "active"
+        }
       }
     ],
     "security": {
