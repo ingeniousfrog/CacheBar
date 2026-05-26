@@ -481,11 +481,15 @@ fn disk_usage() -> CoreResult<Vec<DiskInfo>> {
             continue;
         }
         let total = columns[1].parse::<u64>().unwrap_or(0).saturating_mul(1024);
-        let used = columns[2].parse::<u64>().unwrap_or(0).saturating_mul(1024);
         let free = columns[3].parse::<u64>().unwrap_or(0).saturating_mul(1024);
         if total == 0 {
             continue;
         }
+        // macOS APFS shares space across the container, so `df` reports each
+        // volume's own footprint as "used" (just ~12 GB for the system root)
+        // while `free` reflects the whole container. Derive a self-consistent
+        // used = total - free so the UI matches what users intuitively expect.
+        let used = total.saturating_sub(free);
         let mount = columns[5].to_string();
         if mount.starts_with("/System/Volumes/Preboot")
             || mount.starts_with("/System/Volumes/VM")

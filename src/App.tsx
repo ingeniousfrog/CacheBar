@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 
 type DiskInfo = {
   name: string;
@@ -102,15 +101,8 @@ type OptimizeResult = {
   success: boolean;
 };
 
-type AnalysisNode = {
-  name: string;
-  path: string;
-  size: number;
-  children: AnalysisNode[];
-};
-
 type OperationState = "idle" | "loading" | "success" | "error";
-type TabId = "overview" | "cleanup" | "analyse";
+type TabId = "overview" | "cleanup";
 type CpuSample = [number, number, number];
 
 type ConfirmationRequest = {
@@ -173,13 +165,6 @@ function formatPercent(value: number): string {
   return `${Math.round(value)}%`;
 }
 
-function formatTemp(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) {
-    return "--℃";
-  }
-  return `${value.toFixed(1)}℃`;
-}
-
 function shortPath(path: string): string {
   if (path.startsWith("apfs-snapshot://")) {
     return path.replace("apfs-snapshot://", "");
@@ -226,20 +211,20 @@ function Meter({ value, tone }: { value: number; tone: "green" | "amber" | "blue
 }
 
 function GlassCard({ className = "", children }: { className?: string; children: ReactNode }) {
-  return <div className={`rounded-2xl bg-slate-800/70 p-3 ring-1 ring-white/5 ${className}`}>{children}</div>;
+  return <div className={`rounded-2xl bg-slate-800/60 p-2.5 ring-1 ring-white/5 ${className}`}>{children}</div>;
+}
+
+function CardLabel({ children }: { children: ReactNode }) {
+  return <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{children}</span>;
 }
 
 function CpuAreaChart({ samples }: { samples: CpuSample[] }) {
   const width = 280;
-  const height = 72;
+  const height = 60;
   const pad = 2;
 
   if (samples.length < 2) {
-    return (
-      <div className="flex h-[72px] items-center justify-center rounded-xl bg-slate-950/60 text-[11px] font-semibold text-slate-400">
-        采集中…
-      </div>
-    );
+    return <div className="h-[60px] w-full rounded-lg bg-slate-950/40" />;
   }
 
   const maxY = 100;
@@ -262,23 +247,32 @@ function CpuAreaChart({ samples }: { samples: CpuSample[] }) {
   const totalValues = samples.map((sample) => sample[0] + sample[1]);
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-[72px] w-full rounded-xl bg-slate-950/60" preserveAspectRatio="none">
-      <path d={buildArea(totalValues)} fill="rgba(248,113,113,0.55)" />
-      <path d={buildArea(systemValues)} fill="rgba(56,189,248,0.65)" />
-      <path d={buildArea(userValues)} fill="rgba(59,130,246,0.85)" />
+    <svg viewBox={`0 0 ${width} ${height}`} className="h-[60px] w-full rounded-lg" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="cpuTotal" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(248,113,113,0.55)" />
+          <stop offset="100%" stopColor="rgba(248,113,113,0.05)" />
+        </linearGradient>
+        <linearGradient id="cpuUser" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(59,130,246,0.85)" />
+          <stop offset="100%" stopColor="rgba(59,130,246,0.15)" />
+        </linearGradient>
+      </defs>
+      <path d={buildArea(totalValues)} fill="url(#cpuTotal)" />
+      <path d={buildArea(systemValues)} fill="rgba(56,189,248,0.45)" />
+      <path d={buildArea(userValues)} fill="url(#cpuUser)" />
     </svg>
   );
 }
 
 function TabBar({ active, onChange }: { active: TabId; onChange: (tab: TabId) => void }) {
-  const tabs: { id: TabId; label: string; icon: string }[] = [
-    { id: "overview", label: "Overview", icon: "▦" },
-    { id: "cleanup", label: "Cleanup", icon: "⌫" },
-    { id: "analyse", label: "Analyse", icon: "◎" },
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "cleanup", label: "Cleanup" },
   ];
 
   return (
-    <nav className="flex gap-1 rounded-2xl bg-slate-950/60 p-1 ring-1 ring-white/5">
+    <nav className="flex gap-0.5 rounded-xl bg-slate-950/60 p-0.5 ring-1 ring-white/5">
       {tabs.map((tab) => {
         const isActive = active === tab.id;
         return (
@@ -286,11 +280,10 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (tab: TabId) =>
             key={tab.id}
             type="button"
             onClick={() => onChange(tab.id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-bold transition ${
-              isActive ? "bg-sky-500 text-white shadow" : "text-slate-300 hover:bg-white/10"
+            className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
+              isActive ? "bg-sky-500 text-white shadow-sm" : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
             }`}
           >
-            <span className="text-sm">{tab.icon}</span>
             {tab.label}
           </button>
         );
@@ -300,139 +293,153 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (tab: TabId) =>
 }
 
 function CpuCard({ status, history }: { status: StatusSnapshot | null; history: CpuSample[] }) {
+  const totalUsage = (status?.cpu_user ?? 0) + (status?.cpu_system ?? 0);
+
   return (
-    <GlassCard className="row-span-2 flex min-h-[200px] flex-col">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-lg">⬢</span>
-          <div>
-            <div className="text-sm font-black text-white">CPU</div>
-            <div className="text-[10px] font-semibold text-slate-300">{status?.cpu_brand ?? "—"}</div>
-          </div>
+    <GlassCard className="col-span-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="flex items-baseline gap-2">
+          <CardLabel>CPU</CardLabel>
+          <span className="text-[11px] text-slate-400">{status?.cpu_brand ?? "—"}</span>
         </div>
-        <span className="text-xs font-black text-sky-300">{formatTemp(status?.cpu_temp_c)}</span>
+        <span className="text-xl font-light tabular-nums text-white">
+          {formatPercent(totalUsage)}
+        </span>
       </div>
-      <div className="mt-2 flex-1">
+      <div className="mt-1.5">
         <CpuAreaChart samples={history} />
       </div>
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] font-bold">
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-blue-500" />
-          <span className="text-slate-300">User</span>
-          <span className="ml-auto text-white">{formatPercent(status?.cpu_user ?? 0)}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-rose-400" />
-          <span className="text-slate-300">System</span>
-          <span className="ml-auto text-white">{formatPercent(status?.cpu_system ?? 0)}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-slate-500" />
-          <span className="text-slate-300">Idle</span>
-          <span className="ml-auto text-white">{formatPercent(status?.cpu_idle ?? 0)}</span>
-        </div>
+      <div className="mt-1.5 grid grid-cols-3 gap-2 text-[10px] tabular-nums">
+        <CpuStat color="bg-blue-500" label="User" value={status?.cpu_user ?? 0} />
+        <CpuStat color="bg-sky-400" label="System" value={status?.cpu_system ?? 0} />
+        <CpuStat color="bg-slate-600" label="Idle" value={status?.cpu_idle ?? 0} />
       </div>
     </GlassCard>
   );
 }
 
+function CpuStat({ color, label, value }: { color: string; label: string; value: number }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`h-1.5 w-1.5 rounded-full ${color}`} />
+      <span className="text-slate-400">{label}</span>
+      <span className="ml-auto font-semibold text-slate-100">{formatPercent(value)}</span>
+    </div>
+  );
+}
+
 function DiskCard({ disk }: { disk: DiskInfo | undefined }) {
+  const usedPercent = disk?.used_percent ?? 0;
   return (
     <GlassCard>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-base">💾</span>
-          <span className="text-sm font-black text-white">{disk?.name ?? "Disk"}</span>
-        </div>
-        <span className="text-xs font-black text-sky-300">{formatTemp(disk?.temp_c)}</span>
+      <div className="flex items-baseline justify-between gap-2">
+        <CardLabel>Disk</CardLabel>
+        <span className="text-[10px] text-slate-400">{disk?.name ?? "Disk"}</span>
       </div>
-      <div className="mt-2 space-y-0.5 text-[11px] font-semibold text-slate-200">
-        <div>
-          Used <span className="font-black text-white">{disk ? formatBytes(disk.used) : "—"}</span>
-          <span className="text-slate-400"> / </span>
-          Total <span className="font-black text-white">{disk ? formatBytes(disk.total) : "—"}</span>
-        </div>
-        <div className="text-slate-400">
-          Free {disk ? formatBytes(disk.free) : "—"} · {disk ? formatPercent(disk.used_percent) : "—"} used
-        </div>
+      <div className="mt-1.5 flex items-baseline justify-between gap-2 tabular-nums">
+        <span className="text-base font-semibold text-white">
+          {disk ? formatBytes(disk.used) : "—"}
+        </span>
+        <span className="text-[11px] text-slate-400">/ {disk ? formatBytes(disk.total) : "—"}</span>
       </div>
-      <div className="mt-2">
-        <Meter value={disk?.used_percent ?? 0} tone={(disk?.used_percent ?? 0) > 90 ? "rose" : "blue"} />
+      <div className="mt-1.5">
+        <Meter value={usedPercent} tone={usedPercent > 90 ? "rose" : "blue"} />
       </div>
-      <div className="mt-2 flex items-center justify-between text-[10px] font-semibold text-slate-300">
-        <span>R: {formatRate(disk?.read_bytes_per_sec ?? 0)}</span>
-        <span>W: {formatRate(disk?.write_bytes_per_sec ?? 0)}</span>
-        {disk?.mount ? <span className="text-sky-300">{disk.mount}</span> : null}
+      <div className="mt-1.5 flex items-center justify-between text-[10px] tabular-nums text-slate-400">
+        <span>↓ {formatRate(disk?.read_bytes_per_sec ?? 0)}</span>
+        <span>↑ {formatRate(disk?.write_bytes_per_sec ?? 0)}</span>
       </div>
     </GlassCard>
   );
 }
 
 function RamCard({ status, onFreeUp }: { status: StatusSnapshot | null; onFreeUp: () => void }) {
+  const usage = status?.mem_usage ?? 0;
   return (
     <GlassCard>
-      <div className="flex items-center gap-2">
-        <span className="text-base">▤</span>
-        <span className="text-sm font-black text-white">RAM</span>
-      </div>
-      <div className="mt-2 text-[11px] font-semibold text-slate-200">
-        Used <span className="font-black text-white">{formatBytes(status?.mem_used ?? 0)}</span>
-        <span className="text-slate-400"> / </span>
-        Total <span className="font-black text-white">{formatBytes(status?.mem_total ?? 0)}</span>
-      </div>
-      <div className="mt-1 text-[10px] text-slate-400">
-        Available {formatBytes(status?.mem_available ?? 0)} · Cached {formatBytes(status?.mem_cached ?? 0)}
-      </div>
-      <div className="mt-2">
-        <Meter value={status?.mem_usage ?? 0} tone="blue" />
-      </div>
-      <div className="mt-2 flex justify-end">
-        <button type="button" onClick={onFreeUp} className="text-[11px] font-bold text-sky-300 hover:text-sky-200">
-          Free Up →
+      <div className="flex items-baseline justify-between gap-2">
+        <CardLabel>Memory</CardLabel>
+        <button
+          type="button"
+          onClick={onFreeUp}
+          className="text-[10px] font-semibold text-sky-300 hover:text-sky-200"
+          title="Run system optimization"
+        >
+          Free Up
         </button>
       </div>
-    </GlassCard>
-  );
-}
-
-function FanCard({ fanRpm, hwEnabled }: { fanRpm: number | null; hwEnabled: boolean }) {
-  return (
-    <GlassCard>
-      <div className="flex items-center gap-2">
-        <span className="text-base">🌀</span>
-        <span className="text-sm font-black text-white">FAN</span>
+      <div className="mt-1.5 flex items-baseline justify-between gap-2 tabular-nums">
+        <span className="text-base font-semibold text-white">{formatBytes(status?.mem_used ?? 0)}</span>
+        <span className="text-[11px] text-slate-400">/ {formatBytes(status?.mem_total ?? 0)}</span>
       </div>
-      <div className="mt-3 text-lg font-black text-white">{fanRpm != null ? `${fanRpm} RPM` : "-- RPM"}</div>
-      {fanRpm == null ? (
-        <p className="mt-1 text-[10px] font-semibold text-slate-400">
-          {hwEnabled ? "需 sudo 启动以读取风扇转速" : "已在设置中关闭温度采样"}
-        </p>
-      ) : null}
+      <div className="mt-1.5">
+        <Meter value={usage} tone={usage > 90 ? "rose" : "blue"} />
+      </div>
+      <div className="mt-1.5 flex justify-between text-[10px] tabular-nums text-slate-400">
+        <span>avail {formatBytes(status?.mem_available ?? 0)}</span>
+        <span>cached {formatBytes(status?.mem_cached ?? 0)}</span>
+      </div>
     </GlassCard>
   );
 }
 
 function InternetCard({ network }: { network: NetworkInfo | null }) {
   return (
-    <GlassCard>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-base">🌐</span>
-          <span className="text-sm font-black text-white">INTERNET</span>
-        </div>
-        <span className="text-slate-400">›</span>
+    <GlassCard className="col-span-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <CardLabel>Network</CardLabel>
+        {network ? (
+          <span className="text-[10px] text-slate-400">{network.ip} · {network.name}</span>
+        ) : (
+          <span className="text-[10px] text-slate-500">offline</span>
+        )}
       </div>
-      {network ? (
-        <>
-          <div className="mt-2 flex gap-4 text-[11px] font-bold text-white">
-            <span>↓ {formatRate(network.rx_bytes_per_sec)}</span>
-            <span>↑ {formatRate(network.tx_bytes_per_sec)}</span>
-          </div>
-          <div className="mt-2 text-[11px] font-semibold text-sky-300">{network.ip}</div>
-          <div className="text-[10px] text-slate-400">{network.name}</div>
-        </>
+      <div className="mt-2 grid grid-cols-2 gap-3 tabular-nums">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-[10px] font-semibold uppercase text-emerald-300">↓ DL</span>
+          <span className="text-sm font-semibold text-white">{formatRate(network?.rx_bytes_per_sec ?? 0)}</span>
+        </div>
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-[10px] font-semibold uppercase text-sky-300">↑ UL</span>
+          <span className="text-sm font-semibold text-white">{formatRate(network?.tx_bytes_per_sec ?? 0)}</span>
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
+function ProcessesCard({ processes }: { processes: ProcessInfo[] }) {
+  const top = processes.slice(0, 5);
+  const maxCpu = Math.max(...top.map((p) => p.cpu), 100);
+
+  return (
+    <GlassCard className="col-span-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <CardLabel>Top Processes</CardLabel>
+        <span className="text-[10px] text-slate-400">CPU%</span>
+      </div>
+      {top.length === 0 ? (
+        <p className="mt-2 text-[11px] text-slate-500">no process data</p>
       ) : (
-        <p className="mt-2 text-[11px] font-semibold text-slate-400">无活动网络</p>
+        <ul className="mt-1.5 space-y-1">
+          {top.map((proc) => {
+            const pct = Math.min(100, (proc.cpu / maxCpu) * 100);
+            return (
+              <li key={`${proc.name}-${proc.cpu}`} className="relative overflow-hidden rounded-md">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-md bg-sky-500/15"
+                  style={{ width: `${pct}%` }}
+                />
+                <div className="relative flex items-center justify-between gap-2 px-2 py-0.5 text-[11px]">
+                  <span className="truncate font-medium text-slate-100">{proc.name}</span>
+                  <span className="shrink-0 tabular-nums font-semibold text-slate-100">
+                    {proc.cpu.toFixed(1)}%
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </GlassCard>
   );
@@ -441,23 +448,21 @@ function InternetCard({ network }: { network: NetworkInfo | null }) {
 function OverviewTab({
   status,
   cpuHistory,
-  hwEnabled,
   onFreeUp,
 }: {
   status: StatusSnapshot | null;
   cpuHistory: CpuSample[];
-  hwEnabled: boolean;
   onFreeUp: () => void;
 }) {
   const rootDisk = status?.disks.find((disk) => disk.mount === "/") ?? status?.disks[0];
 
   return (
-    <section className="grid grid-cols-2 gap-2 p-0.5">
+    <section className="grid grid-cols-2 gap-2">
       <CpuCard status={status} history={cpuHistory} />
       <DiskCard disk={rootDisk} />
       <RamCard status={status} onFreeUp={onFreeUp} />
-      <FanCard fanRpm={status?.fan_rpm ?? null} hwEnabled={hwEnabled} />
       <InternetCard network={status?.network ?? null} />
+      <ProcessesCard processes={status?.top_processes ?? []} />
     </section>
   );
 }
@@ -474,24 +479,23 @@ function BottomMenu({
   onQuit: () => void;
 }) {
   const items = [
-    { label: "Refresh", shortcut: "⌘R", onClick: onRefresh, icon: "↻" },
-    { label: "Settings...", shortcut: "⌘,", onClick: onSettings, icon: "⚙" },
-    { label: "About CacheBar", shortcut: "", onClick: onAbout, icon: "ℹ" },
-    { label: "Quit", shortcut: "⌘Q", onClick: onQuit, icon: "⏻" },
+    { label: "Refresh", shortcut: "⌘R", onClick: onRefresh },
+    { label: "Settings…", shortcut: "⌘,", onClick: onSettings },
+    { label: "About CacheBar", shortcut: "", onClick: onAbout },
+    { label: "Quit", shortcut: "⌘Q", onClick: onQuit },
   ];
 
   return (
-    <footer className="border-t border-white/10 pt-2">
+    <footer className="border-t border-white/5 pt-1">
       {items.map((item) => (
         <button
           key={item.label}
           type="button"
           onClick={item.onClick}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[12px] font-medium text-slate-200 transition hover:bg-white/5"
         >
-          <span className="w-5 text-center text-slate-400">{item.icon}</span>
-          <span className="flex-1">{item.label}</span>
-          {item.shortcut ? <span className="text-xs text-slate-400">{item.shortcut}</span> : null}
+          <span>{item.label}</span>
+          {item.shortcut ? <span className="text-[10px] tabular-nums text-slate-500">{item.shortcut}</span> : null}
         </button>
       ))}
     </footer>
@@ -506,38 +510,24 @@ async function openExternal(url: string) {
   }
 }
 
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function SettingsDialog({
   open,
   settings,
   busy,
-  hwEnabledRuntime,
   onClose,
   onSave,
 }: {
   open: boolean;
   settings: AppSettings;
   busy: boolean;
-  hwEnabledRuntime: boolean;
   onClose: () => void;
   onSave: (next: AppSettings) => void;
 }) {
   const [draft, setDraft] = useState(settings);
-  const [copied, setCopied] = useState(false);
-  const sudoCommand = "sudo /Applications/CacheBar.app/Contents/MacOS/CacheBar";
 
   useEffect(() => {
     if (open) {
       setDraft(settings);
-      setCopied(false);
     }
   }, [open, settings]);
 
@@ -547,76 +537,44 @@ function SettingsDialog({
 
   return (
     <ModalShell onClose={onClose}>
-      <h2 className="text-base font-black text-white">Settings</h2>
+      <h2 className="text-base font-bold text-white">Settings</h2>
 
-      <label className="mt-4 block text-xs font-semibold text-slate-300">
-        刷新间隔（秒）
-        <input
-          type="number"
-          min={1}
-          max={60}
-          value={Math.round(draft.refreshIntervalMs / 1000)}
-          onChange={(event) =>
-            setDraft((current) => ({
-              ...current,
-              refreshIntervalMs: Math.max(1000, Number(event.target.value) * 1000),
-            }))
-          }
-          className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
-        />
+      <label className="mt-4 block text-xs font-medium text-slate-300">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Refresh interval</span>
+        <div className="mt-1 flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={Math.round(draft.refreshIntervalMs / 1000)}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                refreshIntervalMs: Math.max(1000, Number(event.target.value) * 1000),
+              }))
+            }
+            className="w-20 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-sm text-white"
+          />
+          <span className="text-xs text-slate-400">seconds</span>
+        </div>
       </label>
 
-      <div className="mt-4 rounded-xl bg-slate-950/60 p-3 ring-1 ring-white/5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-bold text-white">温度 / 风扇采样</span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-              hwEnabledRuntime ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-700/60 text-slate-300"
-            }`}
-          >
-            {hwEnabledRuntime ? "已生效" : "占位 --"}
-          </span>
-        </div>
-        <label className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-300">
-          <input
-            type="checkbox"
-            checked={draft.enableHwMetrics}
-            onChange={(event) => setDraft((current) => ({ ...current, enableHwMetrics: event.target.checked }))}
-            className="h-4 w-4 accent-sky-500"
-          />
-          允许尝试通过 powermetrics 读取
-        </label>
-        <p className="mt-2 text-[11px] leading-4 text-slate-400">
-          powermetrics 需要 root 权限。CacheBar 不会自动请求 sudo，请通过下面的命令以 sudo 启动一次：
-        </p>
-        <div className="mt-2 flex items-center gap-2 rounded-lg bg-black/40 px-2 py-1.5 text-[11px] font-mono text-slate-200">
-          <span className="flex-1 truncate">{sudoCommand}</span>
-          <button
-            type="button"
-            onClick={async () => {
-              if (await copyToClipboard(sudoCommand)) {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              }
-            }}
-            className="rounded-md bg-sky-500 px-2 py-0.5 text-[10px] font-bold text-white"
-          >
-            {copied ? "已复制" : "复制"}
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <button type="button" disabled={busy} onClick={onClose} className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white">
-          取消
+      <div className="mt-5 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onClose}
+          className="rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/15"
+        >
+          Cancel
         </button>
         <button
           type="button"
           disabled={busy}
           onClick={() => onSave(draft)}
-          className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-bold text-white"
+          className="rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-400"
         >
-          保存
+          Save
         </button>
       </div>
     </ModalShell>
@@ -986,74 +944,6 @@ function CategoryRow({
   );
 }
 
-function AnalyseTab({
-  busy,
-  message,
-  nodes,
-  onPick,
-}: {
-  busy: boolean;
-  message: string;
-  nodes: AnalysisNode[];
-  onPick: () => void;
-}) {
-  return (
-    <div className="flex h-full flex-col gap-2">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={onPick}
-        className="rounded-xl border border-dashed border-white/20 px-3 py-2 text-sm font-bold text-slate-200 hover:border-sky-300 disabled:opacity-50"
-      >
-        {busy ? "扫描中..." : nodes.length > 0 ? "重新选择文件夹" : "选择文件夹分析"}
-      </button>
-      {message ? <p className="text-xs font-semibold text-slate-300">{message}</p> : null}
-      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-950/60 p-2 ring-1 ring-white/5">
-        {nodes.length > 0 ? <AnalysisTree nodes={nodes} /> : <div className="py-8 text-center text-xs text-slate-400">还没有选择文件夹</div>}
-      </div>
-    </div>
-  );
-}
-
-function AnalysisTree({ nodes }: { nodes: AnalysisNode[] }) {
-  return (
-    <div className="space-y-1">
-      {nodes.map((node) => (
-        <AnalysisTreeNode key={node.path} node={node} depth={0} />
-      ))}
-    </div>
-  );
-}
-
-function AnalysisTreeNode({ node, depth }: { node: AnalysisNode; depth: number }) {
-  const [expanded, setExpanded] = useState(depth < 1);
-  const hasChildren = node.children.length > 0;
-
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => hasChildren && setExpanded(!expanded)}
-        className="grid w-full grid-cols-[1fr_auto] items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-white/8"
-        style={{ paddingLeft: `${8 + depth * 14}px` }}
-      >
-        <span className="min-w-0 truncate text-xs font-semibold text-slate-100">
-          <span className="mr-1 inline-block w-3 text-slate-400">{hasChildren ? (expanded ? "▾" : "▸") : ""}</span>
-          {node.name}
-        </span>
-        <span className="text-[11px] font-bold text-sky-200">{formatBytes(node.size)}</span>
-      </button>
-      {expanded && hasChildren ? (
-        <div>
-          {node.children.map((child) => (
-            <AnalysisTreeNode key={child.path} node={child} depth={depth + 1} />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export default function App() {
   const [status, setStatus] = useState<StatusSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -1062,7 +952,6 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [operationState, setOperationState] = useState<OperationState>("idle");
   const [message, setMessage] = useState("Ready");
-  const [analysisNodes, setAnalysisNodes] = useState<AnalysisNode[]>([]);
   const [scanResult, setScanResult] = useState<CleanScanResult | null>(null);
   const [lastCleanResult, setLastCleanResult] = useState<CleanResult | null>(null);
   const [selectedCleanupPaths, setSelectedCleanupPaths] = useState<Set<string>>(new Set());
@@ -1072,7 +961,6 @@ export default function App() {
   const [cpuHistory, setCpuHistory] = useState<CpuSample[]>([]);
 
   const busy = operationState === "loading";
-  const hwEnabledRuntime = status?.cpu_temp_c != null || status?.fan_rpm != null;
 
   // While the user is mid-operation (scan, delete, optimize) or has any modal
   // open, suppress the panel's auto-hide-on-blur behaviour so the focus shifts
@@ -1135,7 +1023,10 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [refreshStatus, handleQuit]);
 
-  const handleScan = useCallback(() => {
+  const handleScan = useCallback(async () => {
+    // Lock auto-hide BEFORE issuing the long-running invoke so the panel does
+    // not vanish if the webview briefly loses focus during the IPC roundtrip.
+    await setPanelAutoHide(false);
     setOperationState("loading");
     setMessage("正在扫描可清理项...");
     setLastCleanResult(null);
@@ -1243,6 +1134,7 @@ export default function App() {
       confirmLabel: "确认删除",
       destructive: true,
       action: async () => {
+        await setPanelAutoHide(false);
         setOperationState("loading");
         setMessage("正在删除...");
         try {
@@ -1251,7 +1143,7 @@ export default function App() {
           setOperationState("success");
           setMessage(`已释放 ${formatBytes(result.freed_total)}`);
           setSelectedCleanupPaths(new Set());
-          handleScan();
+          void handleScan();
           void refreshStatus();
         } catch (error) {
           setOperationState("error");
@@ -1267,6 +1159,7 @@ export default function App() {
       description: "会执行 purge 等系统维护任务，刷新缓存与文件系统状态。",
       confirmLabel: "开始优化",
       action: async () => {
+        await setPanelAutoHide(false);
         setOperationState("loading");
         setMessage("Working...");
         try {
@@ -1282,31 +1175,6 @@ export default function App() {
     });
   }, [refreshStatus]);
 
-  const handleAnalyse = useCallback(async () => {
-    await setPanelAutoHide(false);
-    let selected: string | string[] | null;
-    try {
-      selected = await open({ directory: true, multiple: false, title: "Choose directory to analyse" });
-    } finally {
-      await setPanelAutoHide(true);
-    }
-    if (typeof selected !== "string") {
-      return;
-    }
-
-    setOperationState("loading");
-    setMessage("Scanning folder...");
-    try {
-      const nodes = await invoke<AnalysisNode[]>("analyse", { path: selected });
-      setAnalysisNodes(nodes);
-      setOperationState("success");
-      setMessage("Scan complete");
-    } catch (error) {
-      setOperationState("error");
-      setMessage(errorMessage(error));
-    }
-  }, []);
-
   const updatedLabel = useMemo(() => {
     if (!status?.collected_at) {
       return "Updated just now";
@@ -1320,14 +1188,12 @@ export default function App() {
 
   return (
     <main className="h-screen w-screen overflow-hidden bg-transparent text-white">
-      <div className="cachebar-shell flex h-full flex-col gap-3 overflow-hidden rounded-[28px] bg-slate-900/85 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-2xl">
-        <header className="flex items-start justify-between gap-2">
-          <div>
-            <h1 className="text-lg font-black text-white">CacheBar</h1>
-            <p className="text-[11px] font-semibold text-slate-400">
-              {status ? `${status.platform} · uptime ${status.uptime}` : "Gathering status..."} · {updatedLabel}
-            </p>
-          </div>
+      <div className="cachebar-shell flex h-full flex-col gap-2 overflow-hidden rounded-[26px] bg-slate-900/85 p-3 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-2xl">
+        <header className="flex items-center justify-between gap-2 px-1 pt-0.5">
+          <h1 className="text-[13px] font-bold tracking-tight text-white">CacheBar</h1>
+          <span className="truncate text-[10px] font-medium text-slate-500">
+            {status ? `uptime ${status.uptime}` : "loading…"} · {updatedLabel}
+          </span>
         </header>
 
         <TabBar active={activeTab} onChange={setActiveTab} />
@@ -1335,7 +1201,7 @@ export default function App() {
         <div className="min-h-0 flex-1 overflow-hidden">
           {activeTab === "overview" ? (
             <div className="h-full overflow-y-auto">
-              <OverviewTab status={status} cpuHistory={cpuHistory} hwEnabled={settings.enableHwMetrics} onFreeUp={handleOptimize} />
+              <OverviewTab status={status} cpuHistory={cpuHistory} onFreeUp={handleOptimize} />
             </div>
           ) : null}
           {activeTab === "cleanup" ? (
@@ -1356,7 +1222,6 @@ export default function App() {
               onConfirmClean={confirmCleanSelected}
             />
           ) : null}
-          {activeTab === "analyse" ? <AnalyseTab busy={busy} message={message} nodes={analysisNodes} onPick={handleAnalyse} /> : null}
         </div>
 
         <BottomMenu
@@ -1370,7 +1235,6 @@ export default function App() {
           open={settingsOpen}
           settings={settings}
           busy={busy}
-          hwEnabledRuntime={hwEnabledRuntime}
           onClose={() => setSettingsOpen(false)}
           onSave={(next) => {
             setSettings(next);

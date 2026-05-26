@@ -15,8 +15,8 @@
       {
         "label": "main",
         "title": "CacheBar",
-        "width": 430,
-        "height": 760,
+        "width": 380,
+        "height": 620,
         "visible": false,
         "skipTaskbar": true,
         "decorations": false,

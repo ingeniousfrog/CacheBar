@@ -13,6 +13,34 @@ struct PanelState {
     auto_hide: AtomicBool,
 }
 
+/// Round the macOS NSWindow's content layer so the four corners outside the
+/// rounded-rect panel are clipped at the OS level. Without this the window is
+/// a rectangle and the four transparent corners leak whatever desktop / app
+/// content sits behind the panel.
+#[cfg(target_os = "macos")]
+fn round_macos_window(window: &tauri::WebviewWindow<Wry>, radius: f64) {
+    use cocoa::base::{id, nil, NO, YES};
+    use objc::{msg_send, sel, sel_impl};
+
+    let Ok(ns_window_ptr) = window.ns_window() else {
+        return;
+    };
+    let ns_window = ns_window_ptr as id;
+    unsafe {
+        let _: () = msg_send![ns_window, setOpaque: NO];
+        let _: () = msg_send![ns_window, setBackgroundColor: nil];
+        let _: () = msg_send![ns_window, setHasShadow: YES];
+
+        let content_view: id = msg_send![ns_window, contentView];
+        let _: () = msg_send![content_view, setWantsLayer: YES];
+        let layer: id = msg_send![content_view, layer];
+        if layer != nil {
+            let _: () = msg_send![layer, setCornerRadius: radius];
+            let _: () = msg_send![layer, setMasksToBounds: YES];
+        }
+    }
+}
+
 #[tauri::command]
 fn status() -> Result<StatusSnapshot, String> {
     core::status::status()
@@ -105,6 +133,9 @@ fn main() {
                 .build(app)?;
 
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                round_macos_window(&window, 26.0);
+
                 let panel = window.clone();
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
@@ -145,8 +176,8 @@ fn toggle_panel(app: &AppHandle<Wry>, position: PhysicalPosition<f64>) {
         return;
     }
 
-    let panel_width = 430.0;
-    let panel_height = 760.0;
+    let panel_width = 380.0;
+    let panel_height = 620.0;
     let mut x = (position.x - panel_width / 2.0).max(8.0);
     let mut y = (position.y + 10.0).max(8.0);
 
