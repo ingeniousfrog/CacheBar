@@ -32,7 +32,7 @@ A pre-built **Apple Silicon** (`aarch64`) DMG is hosted on Baidu Netdisk:
 
 | | |
 | --- | --- |
-| **Link** | https://pan.baidu.com/s/17yo_XLAvbdwwbPXkchyIuw?pwd=frog |
+| **Link** | https://pan.baidu.com/s/1s698O2B0GMjsj70nlVKhfA?pwd=frog |
 | **提取码** | `frog` |
 
 **Steps**
