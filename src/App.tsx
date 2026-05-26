@@ -181,11 +181,18 @@ function formatTemp(value: number | null | undefined): string {
 }
 
 function shortPath(path: string): string {
+  if (path.startsWith("apfs-snapshot://")) {
+    return path.replace("apfs-snapshot://", "");
+  }
   const parts = path.split("/");
   if (parts.length <= 5) {
     return path;
   }
   return `…/${parts.slice(-3).join("/")}`;
+}
+
+function isVirtualPath(path: string): boolean {
+  return path.startsWith("apfs-snapshot://");
 }
 
 function errorMessage(error: unknown): string {
@@ -866,27 +873,34 @@ function SectionList({
 }) {
   return (
     <div className="space-y-3">
-      {scanResult.sections.map((section) => (
-        <div key={section.name}>
-          <div className="mb-1 flex items-center gap-2 px-1">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">{section.name}</span>
-            <div className="h-px flex-1 bg-white/5" />
+      {scanResult.sections.map((section) => {
+        const sectionItems = section.categories.reduce((sum, cat) => sum + cat.item_count, 0);
+        const sectionBytes = section.categories.reduce((sum, cat) => sum + cat.total_freed, 0);
+        return (
+          <div key={section.name}>
+            <div className="mb-1 flex items-center gap-2 px-1">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-300">{section.name}</span>
+              <div className="h-px flex-1 bg-white/10" />
+              <span className="text-[10px] font-bold text-slate-400">
+                {section.categories.length} 类 · {sectionItems} 项 · {formatBytes(sectionBytes)}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {section.categories.map((category) => (
+                <CategoryRow
+                  key={category.id}
+                  category={category}
+                  expanded={expandedCategoryIds.has(category.id)}
+                  selectedPaths={selectedPaths}
+                  onTogglePath={onTogglePath}
+                  onToggleCategory={() => onToggleCategory(category)}
+                  onToggleExpand={() => onToggleExpand(category.id)}
+                />
+              ))}
+            </div>
           </div>
-          <div className="space-y-2">
-            {section.categories.map((category) => (
-              <CategoryRow
-                key={category.id}
-                category={category}
-                expanded={expandedCategoryIds.has(category.id)}
-                selectedPaths={selectedPaths}
-                onTogglePath={onTogglePath}
-                onToggleCategory={() => onToggleCategory(category)}
-                onToggleExpand={() => onToggleExpand(category.id)}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -959,6 +973,9 @@ function CategoryRow({
               />
               <span className="min-w-0 truncate text-[11px] text-slate-100" title={item.path}>
                 {shortPath(item.path)}
+                {isVirtualPath(item.path) ? (
+                  <span className="ml-1 text-[10px] text-amber-300">· 估算</span>
+                ) : null}
               </span>
               <span className="text-[11px] font-bold text-sky-300">{formatBytes(item.freed)}</span>
             </label>
@@ -1056,6 +1073,16 @@ export default function App() {
 
   const busy = operationState === "loading";
   const hwEnabledRuntime = status?.cpu_temp_c != null || status?.fan_rpm != null;
+
+  // While the user is mid-operation (scan, delete, optimize) or has any modal
+  // open, suppress the panel's auto-hide-on-blur behaviour so the focus shifts
+  // caused by long-running shell commands and confirm dialogs don't dismiss
+  // the panel.
+  useEffect(() => {
+    const shouldDisableAutoHide =
+      busy || confirmation !== null || settingsOpen || aboutOpen;
+    void setPanelAutoHide(!shouldDisableAutoHide);
+  }, [busy, confirmation, settingsOpen, aboutOpen]);
 
   const pushCpuSample = useCallback((snapshot: StatusSnapshot) => {
     const next: CpuSample = [snapshot.cpu_user, snapshot.cpu_system, snapshot.cpu_idle];

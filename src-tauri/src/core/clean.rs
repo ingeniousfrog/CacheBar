@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use super::{
     CleanCategory, CleanEntry, CleanFailure, CleanResult, CleanScanResult, CleanSection,
@@ -8,6 +9,10 @@ use super::{
 };
 
 const MAX_ITEMS_PER_CATEGORY: usize = 200;
+const APFS_SNAPSHOT_PREFIX: &str = "apfs-snapshot://";
+/// Placeholder size shown for APFS local snapshots — the actual reclaimable
+/// space depends on filesystem deltas and is computed by macOS at delete time.
+const APFS_SNAPSHOT_ESTIMATED_BYTES: u64 = 500 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 enum ScanMode {
@@ -15,6 +20,8 @@ enum ScanMode {
     TopLevelChildren,
     /// Treat the entire root directory as a single cleanup item.
     WholeDirectory,
+    /// Special: enumerate APFS local snapshots via `tmutil`.
+    ApfsSnapshots,
 }
 
 #[derive(Clone, Copy)]
@@ -54,39 +61,47 @@ pub fn scan_clean_targets() -> CoreResult<CleanScanResult> {
 
     for rule in &rules {
         let mut items: Vec<CleanEntry> = Vec::new();
-        for root in &rule.roots {
-            if !root.exists() {
-                continue;
+        match rule.mode {
+            ScanMode::ApfsSnapshots => {
+                items.extend(scan_apfs_snapshots(rule));
             }
-            match rule.mode {
-                ScanMode::TopLevelChildren => {
-                    let entries = match fs::read_dir(root) {
-                        Ok(entries) => entries,
-                        Err(_) => continue,
-                    };
-                    for entry in entries.flatten().take(MAX_ITEMS_PER_CATEGORY) {
-                        let path = entry.path();
-                        let freed = directory_size(&path);
-                        if freed == 0 {
-                            continue;
-                        }
-                        items.push(CleanEntry {
-                            category: rule.title.to_string(),
-                            path: path.to_string_lossy().to_string(),
-                            freed,
-                        });
-                    }
-                }
-                ScanMode::WholeDirectory => {
-                    let freed = directory_size(root);
-                    if freed == 0 {
+            ScanMode::TopLevelChildren | ScanMode::WholeDirectory => {
+                for root in &rule.roots {
+                    if !root.exists() {
                         continue;
                     }
-                    items.push(CleanEntry {
-                        category: rule.title.to_string(),
-                        path: root.to_string_lossy().to_string(),
-                        freed,
-                    });
+                    match rule.mode {
+                        ScanMode::TopLevelChildren => {
+                            let entries = match fs::read_dir(root) {
+                                Ok(entries) => entries,
+                                Err(_) => continue,
+                            };
+                            for entry in entries.flatten().take(MAX_ITEMS_PER_CATEGORY) {
+                                let path = entry.path();
+                                let freed = directory_size(&path);
+                                if freed == 0 {
+                                    continue;
+                                }
+                                items.push(CleanEntry {
+                                    category: rule.title.to_string(),
+                                    path: path.to_string_lossy().to_string(),
+                                    freed,
+                                });
+                            }
+                        }
+                        ScanMode::WholeDirectory => {
+                            let freed = directory_size(root);
+                            if freed == 0 {
+                                continue;
+                            }
+                            items.push(CleanEntry {
+                                category: rule.title.to_string(),
+                                path: root.to_string_lossy().to_string(),
+                                freed,
+                            });
+                        }
+                        ScanMode::ApfsSnapshots => unreachable!(),
+                    }
                 }
             }
         }
@@ -148,6 +163,25 @@ pub fn clean_selected(paths: Vec<String>) -> CoreResult<CleanResult> {
     let mut freed_total = 0_u64;
 
     for raw_path in paths {
+        if let Some(name) = raw_path.strip_prefix(APFS_SNAPSHOT_PREFIX) {
+            match delete_apfs_snapshot(name) {
+                Ok(()) => {
+                    freed_total = freed_total.saturating_add(APFS_SNAPSHOT_ESTIMATED_BYTES);
+                    removed.push(CleanEntry {
+                        category: "APFS 本地快照".to_string(),
+                        path: raw_path,
+                        freed: APFS_SNAPSHOT_ESTIMATED_BYTES,
+                    });
+                }
+                Err(error) => skipped.push(CleanFailure {
+                    category: "APFS 本地快照".to_string(),
+                    path: raw_path,
+                    reason: error,
+                }),
+            }
+            continue;
+        }
+
         let path = PathBuf::from(&raw_path);
         let Some(rule) = rules.iter().find(|rule| rule_allows(rule, &path)) else {
             skipped.push(CleanFailure {
@@ -200,9 +234,69 @@ fn rule_allows(rule: &CategoryRule, path: &Path) -> bool {
                     return true;
                 }
             }
+            ScanMode::ApfsSnapshots => {
+                // Handled separately via the `apfs-snapshot://` prefix.
+                return false;
+            }
         }
     }
     false
+}
+
+#[cfg(target_os = "macos")]
+fn scan_apfs_snapshots(rule: &CategoryRule) -> Vec<CleanEntry> {
+    let output = match Command::new("tmutil").args(["listlocalsnapshots", "/"]).output() {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("com.apple.TimeMachine.") {
+                Some(CleanEntry {
+                    category: rule.title.to_string(),
+                    path: format!("{APFS_SNAPSHOT_PREFIX}{trimmed}"),
+                    freed: APFS_SNAPSHOT_ESTIMATED_BYTES,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn scan_apfs_snapshots(_rule: &CategoryRule) -> Vec<CleanEntry> {
+    Vec::new()
+}
+
+#[cfg(target_os = "macos")]
+fn delete_apfs_snapshot(name: &str) -> Result<(), String> {
+    // Snapshot names look like com.apple.TimeMachine.2026-05-26-100000.local;
+    // tmutil expects just the timestamp portion (drop the prefix and suffix).
+    let stripped = name
+        .strip_prefix("com.apple.TimeMachine.")
+        .unwrap_or(name)
+        .strip_suffix(".local")
+        .unwrap_or(name);
+    let output = Command::new("tmutil")
+        .args(["deletelocalsnapshots", stripped])
+        .output()
+        .map_err(|err| format!("tmutil failed to spawn: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn delete_apfs_snapshot(_name: &str) -> Result<(), String> {
+    Err("APFS snapshots are only supported on macOS".to_string())
 }
 
 fn home() -> Option<PathBuf> {
@@ -256,6 +350,34 @@ fn cleanup_rules() -> Vec<CategoryRule> {
             risk: Risk::Safe,
             mode: ScanMode::TopLevelChildren,
             roots: collect(&[&["Library", "Logs"]]),
+        },
+    );
+
+    push(
+        &mut rules,
+        CategoryRule {
+            id: "apfs_snapshots",
+            section: "系统",
+            title: "APFS 本地快照（macOS Purgeable）",
+            description: "Time Machine 自动建立的本地快照，占用 macOS 标注的 Purgeable 空间。系统会在磁盘紧张时自动清理，也可在此手动删除。",
+            risk: Risk::Review,
+            mode: ScanMode::ApfsSnapshots,
+            roots: vec![PathBuf::from("/")],
+        },
+    );
+
+    push(
+        &mut rules,
+        CategoryRule {
+            id: "quicklook_thumbnails",
+            section: "系统",
+            title: "Quick Look 缩略图缓存",
+            description: "Finder 文件预览缩略图缓存，重启或预览时会重新生成。",
+            risk: Risk::Safe,
+            mode: ScanMode::WholeDirectory,
+            roots: collect(&[
+                &["Library", "Caches", "com.apple.QuickLook.thumbnailcache"],
+            ]),
         },
     );
 

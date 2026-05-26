@@ -10,8 +10,8 @@ static SAMPLER: OnceLock<Mutex<SamplerState>> = OnceLock::new();
 struct SamplerState {
     last_net: Option<NetSample>,
     last_disk_io: HashMap<String, DiskIoSample>,
-    powermetrics_disabled: bool,
     last_hw_at: Option<Instant>,
+    last_hw_failure_at: Option<Instant>,
     cached_cpu_temp: Option<f32>,
     cached_fan_rpm: Option<u32>,
     cached_disk_temps: HashMap<String, f32>,
@@ -35,8 +35,8 @@ fn sampler() -> &'static Mutex<SamplerState> {
         Mutex::new(SamplerState {
             last_net: None,
             last_disk_io: HashMap::new(),
-            powermetrics_disabled: false,
             last_hw_at: None,
+            last_hw_failure_at: None,
             cached_cpu_temp: None,
             cached_fan_rpm: None,
             cached_disk_temps: HashMap::new(),
@@ -149,15 +149,40 @@ fn parse_top_cpu_line(line: &str) -> Option<(f32, f32, f32)> {
     let mut idle = None;
     for part in line.split(',') {
         let trimmed = part.trim();
-        if let Some(value) = trimmed.strip_suffix("% user") {
-            user = value.trim().parse().ok();
-        } else if let Some(value) = trimmed.strip_suffix("% sys") {
-            system = value.trim().parse().ok();
-        } else if let Some(value) = trimmed.strip_suffix("% idle") {
-            idle = value.trim().parse().ok();
+        let (prefix, label) = if let Some(rest) = trimmed.strip_suffix("% user") {
+            (rest, "user")
+        } else if let Some(rest) = trimmed.strip_suffix("% sys") {
+            (rest, "sys")
+        } else if let Some(rest) = trimmed.strip_suffix("% idle") {
+            (rest, "idle")
+        } else {
+            continue;
+        };
+        // The prefix may still contain the row label, e.g. "CPU usage: 8.1".
+        // Take the trailing numeric token only.
+        let value: Option<f32> = prefix
+            .split_whitespace()
+            .last()
+            .and_then(|token| token.parse().ok());
+        match label {
+            "user" => user = value,
+            "sys" => system = value,
+            "idle" => idle = value,
+            _ => {}
         }
     }
     Some((user?, system?, idle?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_top_cpu_line;
+
+    #[test]
+    fn parses_macos_top_cpu_line() {
+        let line = "CPU usage: 8.1% user, 14.54% sys, 77.44% idle ";
+        assert_eq!(parse_top_cpu_line(line), Some((8.1, 14.54, 77.44)));
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -194,57 +219,75 @@ fn cpu_breakdown() -> Option<(f32, f32, f32)> {
 }
 
 fn apply_hw_metrics(state: &mut SamplerState) {
-    let should_refresh = state
-        .last_hw_at
-        .map(|at| at.elapsed().as_secs() >= 30)
-        .unwrap_or(true);
+    let now = Instant::now();
+    // Re-sample at most every 15s when successful, and back off for 5 minutes
+    // after a failure so the sampler keeps trying on a slower cadence (e.g.
+    // once the user relaunches with sudo).
+    let success_ttl = 15;
+    let failure_backoff = 300;
 
+    let should_refresh = match (state.last_hw_at, state.last_hw_failure_at) {
+        (None, _) => true,
+        (Some(at), _) if state.cached_cpu_temp.is_some() => at.elapsed().as_secs() >= success_ttl,
+        (Some(_), Some(failed)) => failed.elapsed().as_secs() >= failure_backoff,
+        (Some(at), None) => at.elapsed().as_secs() >= failure_backoff,
+    };
     if !should_refresh {
         return;
     }
 
-    state.last_hw_at = Some(Instant::now());
+    state.last_hw_at = Some(now);
 
     #[cfg(target_os = "macos")]
     {
-        if state.powermetrics_disabled {
-            return;
-        }
-        if let Some((cpu_temp, fan_rpm, disk_temps)) = read_powermetrics() {
-            state.cached_cpu_temp = cpu_temp;
-            state.cached_fan_rpm = fan_rpm;
-            state.cached_disk_temps = disk_temps;
-        } else {
-            state.powermetrics_disabled = true;
+        match read_powermetrics() {
+            Some((cpu_temp, fan_rpm, disk_temps)) if cpu_temp.is_some() || fan_rpm.is_some() => {
+                state.cached_cpu_temp = cpu_temp;
+                state.cached_fan_rpm = fan_rpm;
+                state.cached_disk_temps = disk_temps;
+                state.last_hw_failure_at = None;
+            }
+            _ => {
+                state.last_hw_failure_at = Some(now);
+            }
         }
     }
 }
 
 #[cfg(target_os = "macos")]
 fn read_powermetrics() -> Option<(Option<f32>, Option<u32>, HashMap<String, f32>)> {
+    // powermetrics writes most data to stdout but some warnings (and on some
+    // versions, the smc samples themselves) appear on stderr — read both.
     let output = Command::new("powermetrics")
-        .args(["--samplers", "smc,thermal", "-i", "1000", "-n", "1"])
+        .args(["--samplers", "smc", "-i", "200", "-n", "1"])
         .output()
         .ok()?;
-    if !output.status.success() {
+    let mut text = String::new();
+    if let Ok(stdout) = String::from_utf8(output.stdout) {
+        text.push_str(&stdout);
+    }
+    if let Ok(stderr) = String::from_utf8(output.stderr) {
+        text.push_str(&stderr);
+    }
+    if text.is_empty() {
         return None;
     }
-    let text = String::from_utf8(output.stdout).ok()?;
+
     let mut cpu_temp = None;
     let mut fan_rpm = None;
     let mut disk_temps = HashMap::new();
 
     for line in text.lines() {
         let lower = line.to_lowercase();
-        if lower.contains("cpu die temperature") || lower.contains("cpu avg temperature") {
-            if let Some(value) = extract_first_number(line) {
-                cpu_temp = Some(value);
-            }
+        if cpu_temp.is_none()
+            && (lower.contains("cpu die temperature")
+                || lower.contains("cpu avg temperature")
+                || lower.contains("cpu temperature"))
+        {
+            cpu_temp = extract_first_number(line);
         }
-        if lower.contains("fan") && lower.contains("rpm") {
-            if let Some(value) = extract_first_number(line) {
-                fan_rpm = Some(value.round() as u32);
-            }
+        if fan_rpm.is_none() && lower.contains("fan") && (lower.contains("rpm") || lower.contains("speed")) {
+            fan_rpm = extract_first_number(line).map(|value| value.round() as u32);
         }
         if lower.contains("disk") && lower.contains("temp") {
             if let Some(value) = extract_first_number(line) {
