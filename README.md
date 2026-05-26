@@ -88,7 +88,7 @@ panel mount ──► invoke("status") every N s
 ## Getting started
 
 ```bash
-git clone https://github.com/heqk/CacheBar.git
+git clone https://github.com/ingeniousfrog/CacheBar.git
 cd CacheBar
 npm install
 npm run tauri dev
