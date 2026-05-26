@@ -12,7 +12,7 @@ body,
 }
 
 :root {
-  color: #e2e8f0;
+  color: #faf3e8;
   background: transparent;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -35,11 +35,11 @@ input {
 .cachebar-shell {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgba(191, 219, 254, 0.36) transparent;
+  scrollbar-color: rgba(242, 181, 109, 0.4) transparent;
 }
 
 .cachebar-shell::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 .cachebar-shell::-webkit-scrollbar-track {
@@ -47,8 +47,38 @@ input {
 }
 
 .cachebar-shell::-webkit-scrollbar-thumb {
-  background: rgba(191, 219, 254, 0.28);
+  background: rgba(242, 181, 109, 0.35);
   border: 2px solid transparent;
   border-radius: 999px;
   background-clip: padding-box;
+}
+
+@layer components {
+  .btn-primary {
+    @apply rounded-xl bg-accent-bar px-3 py-2 text-sm font-semibold text-[#2a1a08] shadow-[0_8px_22px_rgba(224,154,66,0.38)] transition hover:brightness-105 disabled:opacity-50;
+  }
+
+  .btn-ghost {
+    @apply rounded-xl bg-cream/[0.06] px-3 py-2 text-sm font-medium text-cream-muted ring-1 ring-cream/10 transition hover:bg-cream/[0.1] hover:text-cream;
+  }
+
+  .btn-danger {
+    @apply rounded-xl bg-gradient-to-r from-rose-400 to-rose-500 px-3 py-2 text-sm font-semibold text-cream shadow-[0_8px_20px_rgba(244,63,94,0.28)] transition hover:brightness-105 disabled:opacity-50;
+  }
+
+  .text-body {
+    @apply text-cream;
+  }
+
+  .text-body-muted {
+    @apply text-cream-muted;
+  }
+
+  .text-body-dim {
+    @apply text-cream-dim;
+  }
+
+  .border-subtle {
+    @apply border-cream/10;
+  }
 }

@@ -195,27 +195,81 @@ async function setPanelAutoHide(enabled: boolean): Promise<void> {
   }
 }
 
-function Meter({ value, tone }: { value: number; tone: "green" | "amber" | "blue" | "rose" }) {
+function Meter({ value, tone = "accent" }: { value: number; tone?: "accent" | "amber" | "rose" }) {
   const color = {
-    green: "bg-emerald-400",
-    amber: "bg-amber-400",
-    blue: "bg-sky-400",
-    rose: "bg-rose-400",
+    accent: "bg-accent-bar",
+    amber: "bg-gradient-to-r from-amber-300 to-orange-400",
+    rose: "bg-gradient-to-r from-rose-300 to-rose-400",
   }[tone];
 
   return (
-    <div className="h-1.5 overflow-hidden rounded-full bg-slate-700/70">
+    <div className="h-1 overflow-hidden rounded-full bg-cream/[0.08]">
       <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(Math.max(value, 0), 100)}%` }} />
     </div>
   );
 }
 
 function GlassCard({ className = "", children }: { className?: string; children: ReactNode }) {
-  return <div className={`rounded-2xl bg-slate-800/60 p-2.5 ring-1 ring-white/5 ${className}`}>{children}</div>;
+  return (
+    <div
+      className={`rounded-2xl border border-cream/10 bg-card-warm p-2.5 shadow-card backdrop-blur-sm ${className}`}
+    >
+      {children}
+    </div>
+  );
 }
 
 function CardLabel({ children }: { children: ReactNode }) {
-  return <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{children}</span>;
+  return <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cream-dim">{children}</span>;
+}
+
+function TabIconShell({ active, children }: { active: boolean; children: ReactNode }) {
+  return (
+    <span
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] transition ${
+        active
+          ? "bg-accent-soft text-accent-muted shadow-tab ring-1 ring-accent/35"
+          : "bg-cream/[0.05] text-cream-dim ring-1 ring-cream/10"
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function IconOverview({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="2" y="2" width="5" height="5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="9" y="2" width="5" height="5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="2" y="9" width="5" height="5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="9" y="9" width="5" height="5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function IconCleanup({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M4 5.5h8M6 5.5V4.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1M6.5 8v3M9.5 8v3M5 5.5l.5 6.5h5l.5-6.5"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function AppLogo({ className = "h-7 w-7" }: { className?: string }) {
+  return (
+    <div
+      className={`flex shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-amber-200 via-orange-300 to-amber-500 text-[11px] font-bold text-[#2a1a08] shadow-[0_4px_14px_rgba(224,154,66,0.45)] ring-1 ring-cream/20 ${className}`}
+    >
+      C
+    </div>
+  );
 }
 
 function CpuAreaChart({ samples }: { samples: CpuSample[] }) {
@@ -224,7 +278,7 @@ function CpuAreaChart({ samples }: { samples: CpuSample[] }) {
   const pad = 2;
 
   if (samples.length < 2) {
-    return <div className="h-[60px] w-full rounded-lg bg-slate-950/40" />;
+    return <div className="h-[60px] w-full rounded-lg bg-cream/[0.04]" />;
   }
 
   const maxY = 100;
@@ -250,29 +304,29 @@ function CpuAreaChart({ samples }: { samples: CpuSample[] }) {
     <svg viewBox={`0 0 ${width} ${height}`} className="h-[60px] w-full rounded-lg" preserveAspectRatio="none">
       <defs>
         <linearGradient id="cpuTotal" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(248,113,113,0.55)" />
-          <stop offset="100%" stopColor="rgba(248,113,113,0.05)" />
+          <stop offset="0%" stopColor="rgba(251,191,36,0.5)" />
+          <stop offset="100%" stopColor="rgba(251,191,36,0.03)" />
         </linearGradient>
         <linearGradient id="cpuUser" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(59,130,246,0.85)" />
-          <stop offset="100%" stopColor="rgba(59,130,246,0.15)" />
+          <stop offset="0%" stopColor="rgba(253,186,116,0.95)" />
+          <stop offset="100%" stopColor="rgba(253,186,116,0.15)" />
         </linearGradient>
       </defs>
       <path d={buildArea(totalValues)} fill="url(#cpuTotal)" />
-      <path d={buildArea(systemValues)} fill="rgba(56,189,248,0.45)" />
+      <path d={buildArea(systemValues)} fill="rgba(245,158,11,0.35)" />
       <path d={buildArea(userValues)} fill="url(#cpuUser)" />
     </svg>
   );
 }
 
 function TabBar({ active, onChange }: { active: TabId; onChange: (tab: TabId) => void }) {
-  const tabs: { id: TabId; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "cleanup", label: "Cleanup" },
+  const tabs: { id: TabId; label: string; icon: ReactNode }[] = [
+    { id: "overview", label: "Overview", icon: <IconOverview /> },
+    { id: "cleanup", label: "Cleanup", icon: <IconCleanup /> },
   ];
 
   return (
-    <nav className="flex gap-0.5 rounded-xl bg-slate-950/60 p-0.5 ring-1 ring-white/5">
+    <nav className="flex gap-1 rounded-2xl bg-surface-inset/90 p-1 ring-1 ring-cream/10">
       {tabs.map((tab) => {
         const isActive = active === tab.id;
         return (
@@ -280,10 +334,13 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (tab: TabId) =>
             key={tab.id}
             type="button"
             onClick={() => onChange(tab.id)}
-            className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
-              isActive ? "bg-sky-500 text-white shadow-sm" : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-2 py-2 text-xs font-medium transition ${
+              isActive
+                ? "bg-gradient-to-b from-cream/[0.12] to-cream/[0.05] text-cream shadow-tab ring-1 ring-cream/15"
+                : "text-cream-dim hover:bg-cream/[0.04] hover:text-cream-muted"
             }`}
           >
+            <TabIconShell active={isActive}>{tab.icon}</TabIconShell>
             {tab.label}
           </button>
         );
@@ -300,9 +357,9 @@ function CpuCard({ status, history }: { status: StatusSnapshot | null; history: 
       <div className="flex items-baseline justify-between gap-2">
         <div className="flex items-baseline gap-2">
           <CardLabel>CPU</CardLabel>
-          <span className="text-[11px] text-slate-400">{status?.cpu_brand ?? "—"}</span>
+          <span className="text-[11px] text-cream-dim">{status?.cpu_brand ?? "—"}</span>
         </div>
-        <span className="text-xl font-light tabular-nums text-white">
+        <span className="text-xl font-light tabular-nums text-cream">
           {formatPercent(totalUsage)}
         </span>
       </div>
@@ -310,9 +367,9 @@ function CpuCard({ status, history }: { status: StatusSnapshot | null; history: 
         <CpuAreaChart samples={history} />
       </div>
       <div className="mt-1.5 grid grid-cols-3 gap-2 text-[10px] tabular-nums">
-        <CpuStat color="bg-blue-500" label="User" value={status?.cpu_user ?? 0} />
-        <CpuStat color="bg-sky-400" label="System" value={status?.cpu_system ?? 0} />
-        <CpuStat color="bg-slate-600" label="Idle" value={status?.cpu_idle ?? 0} />
+        <CpuStat color="bg-amber-300" label="User" value={status?.cpu_user ?? 0} />
+        <CpuStat color="bg-orange-400" label="System" value={status?.cpu_system ?? 0} />
+        <CpuStat color="bg-cream-dim/60" label="Idle" value={status?.cpu_idle ?? 0} />
       </div>
     </GlassCard>
   );
@@ -322,8 +379,8 @@ function CpuStat({ color, label, value }: { color: string; label: string; value:
   return (
     <div className="flex items-center gap-1.5">
       <span className={`h-1.5 w-1.5 rounded-full ${color}`} />
-      <span className="text-slate-400">{label}</span>
-      <span className="ml-auto font-semibold text-slate-100">{formatPercent(value)}</span>
+      <span className="text-cream-dim">{label}</span>
+      <span className="ml-auto font-semibold text-cream-muted">{formatPercent(value)}</span>
     </div>
   );
 }
@@ -334,18 +391,18 @@ function DiskCard({ disk }: { disk: DiskInfo | undefined }) {
     <GlassCard>
       <div className="flex items-baseline justify-between gap-2">
         <CardLabel>Disk</CardLabel>
-        <span className="text-[10px] text-slate-400">{disk?.name ?? "Disk"}</span>
+        <span className="text-[10px] text-cream-dim">{disk?.name ?? "Disk"}</span>
       </div>
       <div className="mt-1.5 flex items-baseline justify-between gap-2 tabular-nums">
-        <span className="text-base font-semibold text-white">
+        <span className="text-base font-semibold text-cream">
           {disk ? formatBytes(disk.used) : "—"}
         </span>
-        <span className="text-[11px] text-slate-400">/ {disk ? formatBytes(disk.total) : "—"}</span>
+        <span className="text-[11px] text-cream-dim">/ {disk ? formatBytes(disk.total) : "—"}</span>
       </div>
       <div className="mt-1.5">
-        <Meter value={usedPercent} tone={usedPercent > 90 ? "rose" : "blue"} />
+        <Meter value={usedPercent} tone={usedPercent > 90 ? "rose" : "accent"} />
       </div>
-      <div className="mt-1.5 flex items-center justify-between text-[10px] tabular-nums text-slate-400">
+      <div className="mt-1.5 flex items-center justify-between text-[10px] tabular-nums text-cream-dim">
         <span>↓ {formatRate(disk?.read_bytes_per_sec ?? 0)}</span>
         <span>↑ {formatRate(disk?.write_bytes_per_sec ?? 0)}</span>
       </div>
@@ -362,20 +419,20 @@ function RamCard({ status, onFreeUp }: { status: StatusSnapshot | null; onFreeUp
         <button
           type="button"
           onClick={onFreeUp}
-          className="text-[10px] font-semibold text-sky-300 hover:text-sky-200"
+          className="text-[10px] font-semibold text-accent hover:text-accent"
           title="Run system optimization"
         >
           Free Up
         </button>
       </div>
       <div className="mt-1.5 flex items-baseline justify-between gap-2 tabular-nums">
-        <span className="text-base font-semibold text-white">{formatBytes(status?.mem_used ?? 0)}</span>
-        <span className="text-[11px] text-slate-400">/ {formatBytes(status?.mem_total ?? 0)}</span>
+        <span className="text-base font-semibold text-cream">{formatBytes(status?.mem_used ?? 0)}</span>
+        <span className="text-[11px] text-cream-dim">/ {formatBytes(status?.mem_total ?? 0)}</span>
       </div>
       <div className="mt-1.5">
-        <Meter value={usage} tone={usage > 90 ? "rose" : "blue"} />
+        <Meter value={usage} tone={usage > 90 ? "rose" : "accent"} />
       </div>
-      <div className="mt-1.5 flex justify-between text-[10px] tabular-nums text-slate-400">
+      <div className="mt-1.5 flex justify-between text-[10px] tabular-nums text-cream-dim">
         <span>avail {formatBytes(status?.mem_available ?? 0)}</span>
         <span>cached {formatBytes(status?.mem_cached ?? 0)}</span>
       </div>
@@ -389,19 +446,19 @@ function InternetCard({ network }: { network: NetworkInfo | null }) {
       <div className="flex items-baseline justify-between gap-2">
         <CardLabel>Network</CardLabel>
         {network ? (
-          <span className="text-[10px] text-slate-400">{network.ip} · {network.name}</span>
+          <span className="text-[10px] text-cream-dim">{network.ip} · {network.name}</span>
         ) : (
-          <span className="text-[10px] text-slate-500">offline</span>
+          <span className="text-[10px] text-cream-dim">offline</span>
         )}
       </div>
       <div className="mt-2 grid grid-cols-2 gap-3 tabular-nums">
         <div className="flex items-baseline gap-1.5">
-          <span className="text-[10px] font-semibold uppercase text-emerald-300">↓ DL</span>
-          <span className="text-sm font-semibold text-white">{formatRate(network?.rx_bytes_per_sec ?? 0)}</span>
+          <span className="text-[10px] font-semibold uppercase text-amber-200/95">↓ DL</span>
+          <span className="text-sm font-semibold text-cream">{formatRate(network?.rx_bytes_per_sec ?? 0)}</span>
         </div>
         <div className="flex items-baseline gap-1.5">
-          <span className="text-[10px] font-semibold uppercase text-sky-300">↑ UL</span>
-          <span className="text-sm font-semibold text-white">{formatRate(network?.tx_bytes_per_sec ?? 0)}</span>
+          <span className="text-[10px] font-semibold uppercase text-accent/90">↑ UL</span>
+          <span className="text-sm font-semibold text-cream">{formatRate(network?.tx_bytes_per_sec ?? 0)}</span>
         </div>
       </div>
     </GlassCard>
@@ -416,10 +473,10 @@ function ProcessesCard({ processes }: { processes: ProcessInfo[] }) {
     <GlassCard className="col-span-2">
       <div className="flex items-baseline justify-between gap-2">
         <CardLabel>Top Processes</CardLabel>
-        <span className="text-[10px] text-slate-400">CPU%</span>
+        <span className="text-[10px] text-cream-dim">CPU%</span>
       </div>
       {top.length === 0 ? (
-        <p className="mt-2 text-[11px] text-slate-500">no process data</p>
+        <p className="mt-2 text-[11px] text-cream-dim">no process data</p>
       ) : (
         <ul className="mt-1.5 space-y-1">
           {top.map((proc) => {
@@ -427,12 +484,12 @@ function ProcessesCard({ processes }: { processes: ProcessInfo[] }) {
             return (
               <li key={`${proc.name}-${proc.cpu}`} className="relative overflow-hidden rounded-md">
                 <div
-                  className="absolute inset-y-0 left-0 rounded-md bg-sky-500/15"
+                  className="absolute inset-y-0 left-0 rounded-md bg-accent-soft"
                   style={{ width: `${pct}%` }}
                 />
                 <div className="relative flex items-center justify-between gap-2 px-2 py-0.5 text-[11px]">
-                  <span className="truncate font-medium text-slate-100">{proc.name}</span>
-                  <span className="shrink-0 tabular-nums font-semibold text-slate-100">
+                  <span className="truncate font-medium text-cream">{proc.name}</span>
+                  <span className="shrink-0 tabular-nums font-semibold text-cream">
                     {proc.cpu.toFixed(1)}%
                   </span>
                 </div>
@@ -486,16 +543,16 @@ function BottomMenu({
   ];
 
   return (
-    <footer className="border-t border-white/5 pt-1">
+    <footer className="border-t border-cream/[0.06] pt-1">
       {items.map((item) => (
         <button
           key={item.label}
           type="button"
           onClick={item.onClick}
-          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[12px] font-medium text-slate-200 transition hover:bg-white/5"
+          className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[12px] font-medium text-cream-muted transition hover:bg-cream/[0.04] hover:text-cream"
         >
           <span>{item.label}</span>
-          {item.shortcut ? <span className="text-[10px] tabular-nums text-slate-500">{item.shortcut}</span> : null}
+          {item.shortcut ? <span className="text-[10px] tabular-nums text-cream-dim/80">{item.shortcut}</span> : null}
         </button>
       ))}
     </footer>
@@ -537,10 +594,10 @@ function SettingsDialog({
 
   return (
     <ModalShell onClose={onClose}>
-      <h2 className="text-base font-bold text-white">Settings</h2>
+      <h2 className="text-base font-bold text-cream">Settings</h2>
 
-      <label className="mt-4 block text-xs font-medium text-slate-300">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Refresh interval</span>
+      <label className="mt-4 block text-xs font-medium text-cream-muted">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-cream-dim">Refresh interval</span>
         <div className="mt-1 flex items-center gap-2">
           <input
             type="number"
@@ -553,9 +610,9 @@ function SettingsDialog({
                 refreshIntervalMs: Math.max(1000, Number(event.target.value) * 1000),
               }))
             }
-            className="w-20 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-sm text-white"
+            className="w-20 rounded-lg border border-cream/10 bg-black/30 px-2.5 py-1.5 text-sm text-cream"
           />
-          <span className="text-xs text-slate-400">seconds</span>
+          <span className="text-xs text-cream-dim">seconds</span>
         </div>
       </label>
 
@@ -564,7 +621,7 @@ function SettingsDialog({
           type="button"
           disabled={busy}
           onClick={onClose}
-          className="rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/15"
+          className="btn-ghost"
         >
           Cancel
         </button>
@@ -572,7 +629,7 @@ function SettingsDialog({
           type="button"
           disabled={busy}
           onClick={() => onSave(draft)}
-          className="rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-400"
+          className="btn-primary"
         >
           Save
         </button>
@@ -588,24 +645,24 @@ function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   return (
     <ModalShell onClose={onClose}>
-      <h2 className="text-base font-black text-white">About CacheBar</h2>
-      <p className="mt-2 text-sm font-semibold text-slate-200">版本 {APP_VERSION}</p>
-      <p className="mt-2 text-xs leading-5 text-slate-300">
+      <h2 className="text-base font-black text-cream">About CacheBar</h2>
+      <p className="mt-2 text-sm font-semibold text-cream-muted">版本 {APP_VERSION}</p>
+      <p className="mt-2 text-xs leading-5 text-cream-muted">
         macOS 菜单栏系统监控与缓存清理工具。结合 iStat 风格的硬件面板与 mole 风格的分类清理。
       </p>
       <div className="mt-3 flex items-center gap-2 text-xs">
-        <span className="text-slate-400">GitHub:</span>
-        <code className="flex-1 truncate rounded bg-black/40 px-2 py-1 font-mono text-sky-300">{GITHUB_URL}</code>
+        <span className="text-cream-dim">GitHub:</span>
+        <code className="flex-1 truncate rounded-lg bg-black/30 px-2 py-1 font-mono text-accent">{GITHUB_URL}</code>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={() => void openExternal(GITHUB_URL)}
-          className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white"
+          className="rounded-xl bg-cream/10 px-3 py-2 text-sm font-bold text-cream"
         >
           浏览器打开
         </button>
-        <button type="button" onClick={onClose} className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-bold text-white">
+        <button type="button" onClick={onClose} className="btn-primary">
           关闭
         </button>
       </div>
@@ -616,7 +673,7 @@ function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
 function ModalShell({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <section className="w-full max-w-sm rounded-2xl bg-slate-900/95 p-4 shadow-xl ring-1 ring-white/10">
+      <section className="w-full max-w-sm rounded-2xl border border-cream/10 bg-gradient-to-b from-surface-glow to-surface-raised p-4 shadow-panel ring-1 ring-cream/15 backdrop-blur-xl">
         {children}
         <button type="button" onClick={onClose} className="sr-only">
           close
@@ -651,18 +708,18 @@ function ConfirmDialog({
 
   return (
     <ModalShell onClose={onCancel}>
-      <h2 className="text-base font-black text-white">{title}</h2>
-      <p className="mt-2 text-xs font-semibold leading-5 text-slate-300">{description}</p>
+      <h2 className="text-base font-black text-cream">{title}</h2>
+      <p className="mt-2 text-xs font-semibold leading-5 text-cream-muted">{description}</p>
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <button type="button" disabled={busy} onClick={onCancel} className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">
+        <button type="button" disabled={busy} onClick={onCancel} className="rounded-xl bg-cream/10 px-3 py-2 text-sm font-bold text-cream disabled:opacity-50">
           取消
         </button>
         <button
           type="button"
           disabled={busy}
           onClick={onConfirm}
-          className={`rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-50 ${
-            destructive ? "bg-rose-500" : "bg-sky-500"
+          className={`rounded-xl px-3 py-2 text-sm font-bold text-cream disabled:opacity-50 ${
+            destructive ? "bg-rose-500" : "bg-accent"
           }`}
         >
           {busy ? "处理中..." : confirmLabel}
@@ -675,13 +732,13 @@ function ConfirmDialog({
 function RiskBadge({ risk }: { risk: "safe" | "review" }) {
   if (risk === "review") {
     return (
-      <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+      <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-bold text-amber-100">
         请确认
       </span>
     );
   }
   return (
-    <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-200">
+    <span className="rounded-full bg-emerald-400/18 px-2 py-0.5 text-[10px] font-bold text-emerald-100">
       安全
     </span>
   );
@@ -732,16 +789,16 @@ function CleanupTab({
           type="button"
           disabled={busy}
           onClick={onScan}
-          className="flex-1 rounded-xl bg-sky-500 px-3 py-2 text-sm font-black text-white disabled:opacity-50"
+          className="btn-primary flex-1 disabled:opacity-50"
         >
           {busy && operationState === "loading" ? "扫描中..." : scanResult ? "重新扫描" : "扫描可清理项"}
         </button>
         {scanResult && allItems.length > 0 ? (
           <>
-            <button type="button" onClick={onSelectAll} className="rounded-xl bg-white/10 px-2.5 py-2 text-xs font-bold text-white">
+            <button type="button" onClick={onSelectAll} className="rounded-xl bg-cream/10 px-2.5 py-2 text-xs font-bold text-cream">
               全选安全项
             </button>
-            <button type="button" onClick={onSelectNone} className="rounded-xl bg-white/10 px-2.5 py-2 text-xs font-bold text-white">
+            <button type="button" onClick={onSelectNone} className="rounded-xl bg-cream/10 px-2.5 py-2 text-xs font-bold text-cream">
               清空
             </button>
           </>
@@ -751,7 +808,7 @@ function CleanupTab({
       {operationState === "loading" || operationState === "error" ? (
         <div
           className={`rounded-xl px-3 py-2 text-xs font-bold ${
-            operationState === "error" ? "bg-rose-500/20 text-rose-100" : "bg-sky-500/20 text-sky-100"
+            operationState === "error" ? "bg-rose-500/15 text-rose-100" : "bg-accent-soft text-accent"
           }`}
         >
           {message}
@@ -765,11 +822,11 @@ function CleanupTab({
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-950/60 p-2 ring-1 ring-white/5">
+      <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-cream/[0.05] bg-surface-inset/60 p-2">
         {!scanResult ? (
           <EmptyHint />
         ) : noResults ? (
-          <div className="py-10 text-center text-xs text-slate-400">没有发现可清理项 🎉</div>
+          <div className="py-10 text-center text-xs text-cream-dim">没有发现可清理项 🎉</div>
         ) : (
           <SectionList
             scanResult={scanResult}
@@ -783,18 +840,18 @@ function CleanupTab({
       </div>
 
       {scanResult && allItems.length > 0 ? (
-        <div className="rounded-xl bg-slate-900/80 p-2 ring-1 ring-white/10">
+        <div className="rounded-xl border border-cream/[0.06] bg-surface-card/90 p-2">
           <div className="mb-2 flex items-center justify-between text-xs font-bold">
-            <span className="text-slate-200">
+            <span className="text-cream-muted">
               已选 {selectedPaths.size} 项 · {formatBytes(selectedTotal)}
             </span>
-            <span className="text-slate-400">合计可清理 {formatBytes(scanResult.total_freed)}</span>
+            <span className="text-cream-dim">合计可清理 {formatBytes(scanResult.total_freed)}</span>
           </div>
           <button
             type="button"
             disabled={busy || selectedPaths.size === 0}
             onClick={onConfirmClean}
-            className="w-full rounded-xl bg-rose-500 px-3 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-danger w-full disabled:cursor-not-allowed"
           >
             {busy && operationState === "loading" ? "删除中..." : `确认删除所选 ${selectedPaths.size} 项`}
           </button>
@@ -806,7 +863,7 @@ function CleanupTab({
 
 function EmptyHint() {
   return (
-    <div className="py-10 text-center text-xs text-slate-400">
+    <div className="py-10 text-center text-xs text-cream-dim">
       点击「扫描可清理项」检查系统中的缓存。
       <br />
       所有项目都会按类别列出，附描述与安全等级。
@@ -837,9 +894,9 @@ function SectionList({
         return (
           <div key={section.name}>
             <div className="mb-1 flex items-center gap-2 px-1">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-300">{section.name}</span>
-              <div className="h-px flex-1 bg-white/10" />
-              <span className="text-[10px] font-bold text-slate-400">
+              <span className="text-[10px] font-black uppercase tracking-wider text-cream-muted">{section.name}</span>
+              <div className="h-px flex-1 bg-cream/10" />
+              <span className="text-[10px] font-bold text-cream-dim">
                 {section.categories.length} 类 · {sectionItems} 项 · {formatBytes(sectionBytes)}
               </span>
             </div>
@@ -883,7 +940,7 @@ function CategoryRow({
   const partial = selectedCount > 0 && !allSelected;
 
   return (
-    <div className="rounded-xl bg-slate-800/60 ring-1 ring-white/5">
+    <div className="rounded-xl border border-cream/[0.05] bg-surface-card/70">
       <div className="flex items-center gap-2 px-2 py-2">
         <input
           type="checkbox"
@@ -892,50 +949,50 @@ function CategoryRow({
             if (input) input.indeterminate = partial;
           }}
           onChange={onToggleCategory}
-          className="h-4 w-4 shrink-0 accent-sky-500"
+          className="h-4 w-4 shrink-0 accent-amber-400"
         />
         <button
           type="button"
           onClick={onToggleExpand}
           className="flex flex-1 min-w-0 items-center gap-2 text-left"
         >
-          <span className="w-3 text-xs text-slate-400">{expanded ? "▾" : "▸"}</span>
+          <span className="w-3 text-xs text-cream-dim">{expanded ? "▾" : "▸"}</span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate text-sm font-bold text-white">{category.title}</span>
+              <span className="truncate text-sm font-bold text-cream">{category.title}</span>
               <RiskBadge risk={category.risk} />
             </div>
-            <p className="mt-0.5 truncate text-[10px] text-slate-400" title={category.description}>
+            <p className="mt-0.5 truncate text-[10px] text-cream-dim" title={category.description}>
               {category.description}
             </p>
           </div>
           <div className="shrink-0 text-right text-[11px] font-bold">
-            <div className="text-sky-300">{formatBytes(category.total_freed)}</div>
-            <div className="text-slate-400">{category.item_count} 项</div>
+            <div className="text-accent">{formatBytes(category.total_freed)}</div>
+            <div className="text-cream-dim">{category.item_count} 项</div>
           </div>
         </button>
       </div>
 
       {expanded ? (
-        <div className="space-y-1 border-t border-white/5 px-2 py-2">
+        <div className="space-y-1 border-t border-cream/5 px-2 py-2">
           {category.items.map((item) => (
             <label
               key={item.path}
-              className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg bg-slate-900/60 px-2 py-1.5 hover:bg-slate-900/90"
+              className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg bg-cream/[0.03] px-2 py-1.5 hover:bg-cream/[0.06]"
             >
               <input
                 type="checkbox"
                 checked={selectedPaths.has(item.path)}
                 onChange={() => onTogglePath(item.path)}
-                className="h-4 w-4 accent-sky-500"
+                className="h-4 w-4 accent-amber-400"
               />
-              <span className="min-w-0 truncate text-[11px] text-slate-100" title={item.path}>
+              <span className="min-w-0 truncate text-[11px] text-cream" title={item.path}>
                 {shortPath(item.path)}
                 {isVirtualPath(item.path) ? (
                   <span className="ml-1 text-[10px] text-amber-300">· 估算</span>
                 ) : null}
               </span>
-              <span className="text-[11px] font-bold text-sky-300">{formatBytes(item.freed)}</span>
+              <span className="text-[11px] font-bold text-accent">{formatBytes(item.freed)}</span>
             </label>
           ))}
         </div>
@@ -1187,11 +1244,18 @@ export default function App() {
   }, [status?.collected_at]);
 
   return (
-    <main className="h-screen w-screen overflow-hidden rounded-[26px] bg-[#0f172a] text-white">
-      <div className="cachebar-shell flex h-full flex-col gap-2 overflow-hidden rounded-[26px] bg-slate-900 p-3 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ring-1 ring-white/10">
-        <header className="flex items-center justify-between gap-2 px-1 pt-0.5">
-          <h1 className="text-[13px] font-bold tracking-tight text-white">CacheBar</h1>
-          <span className="truncate text-[10px] font-medium text-slate-500">
+    <main className="relative h-screen w-screen overflow-hidden rounded-[26px] bg-surface text-cream">
+      <div
+        className="pointer-events-none absolute inset-x-8 top-0 h-24 rounded-full bg-accent/20 blur-3xl"
+        aria-hidden
+      />
+      <div className="cachebar-shell relative flex h-full flex-col gap-2.5 overflow-hidden rounded-[26px] bg-panel-warm p-3 shadow-panel ring-1 ring-cream/10">
+        <header className="flex items-center justify-between gap-2 px-0.5 pt-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <AppLogo />
+            <h1 className="text-[13px] font-semibold tracking-tight text-cream">CacheBar</h1>
+          </div>
+          <span className="truncate text-[10px] font-medium text-cream-dim">
             {status ? `uptime ${status.uptime}` : "loading…"} · {updatedLabel}
           </span>
         </header>

@@ -1,11 +1,11 @@
 mod core;
+mod tray_icon;
 
 use core::{
     AnalysisNode, CleanResult, CleanScanResult, OptimizeResult, StatusSnapshot, UninstallResult,
 };
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, PhysicalPosition, WindowEvent, Wry};
 
@@ -166,7 +166,7 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            let icon = Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+            let icon = tray_icon::load_tray_icon()?;
 
             TrayIconBuilder::with_id("cachebar")
                 .icon(icon)
