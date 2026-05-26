@@ -1,8 +1,7 @@
 <p align="center">
-  <img src="src-tauri/icons/icon.png" alt="CacheBar logo" width="96" height="96" />
+  <img src="src-tauri/icons/icon.png" alt="CacheBar logo" width="48" height="48" style="vertical-align: middle; border-radius: 10px;" />
+  <strong style="font-size: 1.75rem; font-weight: 700; vertical-align: middle;"> CacheBar</strong>
 </p>
-
-<h1 align="center">CacheBar</h1>
 
 <p align="center">
   A lightweight macOS menu bar utility for real-time system monitoring and safe cache cleanup.<br />

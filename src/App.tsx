@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import appIcon from "../src-tauri/icons/icon.png";
 
 type DiskInfo = {
   name: string;
@@ -264,11 +265,11 @@ function IconCleanup({ className = "h-3.5 w-3.5" }: { className?: string }) {
 
 function AppLogo({ className = "h-7 w-7" }: { className?: string }) {
   return (
-    <div
-      className={`flex shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-amber-200 via-orange-300 to-amber-500 text-[11px] font-bold text-[#2a1a08] shadow-[0_4px_14px_rgba(224,154,66,0.45)] ring-1 ring-cream/20 ${className}`}
-    >
-      C
-    </div>
+    <img
+      src={appIcon}
+      alt=""
+      className={`shrink-0 rounded-[10px] object-cover ring-1 ring-cream/20 shadow-[0_4px_14px_rgba(224,154,66,0.25)] ${className}`}
+    />
   );
 }
 
