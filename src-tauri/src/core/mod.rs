@@ -9,6 +9,12 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct StatusSnapshot {
     pub cpu_usage: f32,
+    pub cpu_user: f32,
+    pub cpu_system: f32,
+    pub cpu_idle: f32,
+    pub cpu_brand: String,
+    pub cpu_temp_c: Option<f32>,
+    pub fan_rpm: Option<u32>,
     pub mem_usage: f32,
     pub mem_used: u64,
     pub mem_total: u64,
@@ -34,6 +40,9 @@ pub struct DiskInfo {
     pub free: u64,
     pub total: u64,
     pub used_percent: f32,
+    pub read_bytes_per_sec: u64,
+    pub write_bytes_per_sec: u64,
+    pub temp_c: Option<f32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +62,8 @@ pub struct ProcessInfo {
 pub struct NetworkInfo {
     pub name: String,
     pub ip: String,
+    pub rx_bytes_per_sec: u64,
+    pub tx_bytes_per_sec: u64,
 }
 
 #[derive(Debug, Serialize)]

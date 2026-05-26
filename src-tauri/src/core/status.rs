@@ -1,18 +1,75 @@
+use std::collections::HashMap;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use super::{CoreResult, DiskInfo, NetworkInfo, PowerInfo, ProcessInfo, StatusSnapshot};
 
+static SAMPLER: OnceLock<Mutex<SamplerState>> = OnceLock::new();
+
+struct SamplerState {
+    last_net: Option<NetSample>,
+    last_disk_io: HashMap<String, DiskIoSample>,
+    powermetrics_disabled: bool,
+    last_hw_at: Option<Instant>,
+    cached_cpu_temp: Option<f32>,
+    cached_fan_rpm: Option<u32>,
+    cached_disk_temps: HashMap<String, f32>,
+}
+
+struct NetSample {
+    iface: String,
+    rx_bytes: u64,
+    tx_bytes: u64,
+    at: Instant,
+}
+
+struct DiskIoSample {
+    read_bytes: u64,
+    write_bytes: u64,
+    at: Instant,
+}
+
+fn sampler() -> &'static Mutex<SamplerState> {
+    SAMPLER.get_or_init(|| {
+        Mutex::new(SamplerState {
+            last_net: None,
+            last_disk_io: HashMap::new(),
+            powermetrics_disabled: false,
+            last_hw_at: None,
+            cached_cpu_temp: None,
+            cached_fan_rpm: None,
+            cached_disk_temps: HashMap::new(),
+        })
+    })
+}
+
 pub fn status() -> CoreResult<StatusSnapshot> {
-    let disks = disk_usage()?;
+    let mut disks = disk_usage()?;
     let root_disk = disks.first();
     let disk_free = root_disk.map(|disk| disk.free).unwrap_or(0);
     let disk_total = root_disk.map(|disk| disk.total).unwrap_or(0);
     let disk_usage = percent(disk_total.saturating_sub(disk_free), disk_total);
     let memory = memory_snapshot();
+    let cpu_breakdown = cpu_breakdown().unwrap_or((0.0, 0.0, 100.0));
+    let (cpu_user, cpu_system, cpu_idle) = cpu_breakdown;
+    let cpu_usage = (cpu_user + cpu_system).clamp(0.0, 100.0);
+
+    let mut state = sampler().lock().map_err(|_| "Sampler lock poisoned".to_string())?;
+    apply_disk_io_rates(&mut state, &mut disks);
+    apply_hw_metrics(&mut state);
+    let network = network_info_with_rates(&mut state);
+    let cpu_temp_c = state.cached_cpu_temp;
+    let fan_rpm = state.cached_fan_rpm;
 
     Ok(StatusSnapshot {
-        cpu_usage: cpu_usage().unwrap_or(0.0),
+        cpu_usage,
+        cpu_user,
+        cpu_system,
+        cpu_idle,
+        cpu_brand: cpu_brand(),
+        cpu_temp_c,
+        fan_rpm,
         mem_usage: percent(memory.used, memory.total),
         mem_used: memory.used,
         mem_total: memory.total,
@@ -24,7 +81,7 @@ pub fn status() -> CoreResult<StatusSnapshot> {
         disks,
         power: power_info(),
         top_processes: top_processes(),
-        network: network_info(),
+        network,
         uptime: uptime().unwrap_or_else(|| "unknown".to_string()),
         platform: std::env::consts::OS.to_string(),
         collected_at: now_unix_seconds().to_string(),
@@ -61,6 +118,315 @@ fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
     String::from_utf8(output.stdout).ok()
 }
 
+fn cpu_brand() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        command_stdout("sysctl", &["-n", "machdep.cpu.brand_string"])
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "CPU".to_string())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(content) = std::fs::read_to_string("/proc/cpuinfo") {
+            for line in content.lines() {
+                if let Some(model) = line.strip_prefix("model name\t: ") {
+                    return model.trim().to_string();
+                }
+            }
+        }
+        "CPU".to_string()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        "CPU".to_string()
+    }
+}
+
+fn parse_top_cpu_line(line: &str) -> Option<(f32, f32, f32)> {
+    let mut user = None;
+    let mut system = None;
+    let mut idle = None;
+    for part in line.split(',') {
+        let trimmed = part.trim();
+        if let Some(value) = trimmed.strip_suffix("% user") {
+            user = value.trim().parse().ok();
+        } else if let Some(value) = trimmed.strip_suffix("% sys") {
+            system = value.trim().parse().ok();
+        } else if let Some(value) = trimmed.strip_suffix("% idle") {
+            idle = value.trim().parse().ok();
+        }
+    }
+    Some((user?, system?, idle?))
+}
+
+#[cfg(target_os = "macos")]
+fn cpu_breakdown() -> Option<(f32, f32, f32)> {
+    let output = command_stdout("top", &["-l", "1", "-n", "0", "-s", "0"])?;
+    let line = output.lines().find(|line| line.contains("CPU usage"))?;
+    parse_top_cpu_line(line)
+}
+
+#[cfg(target_os = "linux")]
+fn cpu_breakdown() -> Option<(f32, f32, f32)> {
+    let first = read_linux_cpu_sample()?;
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    let second = read_linux_cpu_sample()?;
+    let total = second.0.checked_sub(first.0)?;
+    let idle = second.1.checked_sub(first.1)?;
+    if total == 0 {
+        return Some((0.0, 0.0, 100.0));
+    }
+    let idle_pct = (idle as f64 / total as f64) * 100.0;
+    let used_pct = 100.0 - idle_pct;
+    Some((used_pct as f32 * 0.7, used_pct as f32 * 0.3, idle_pct as f32))
+}
+
+#[cfg(target_os = "windows")]
+fn cpu_breakdown() -> Option<(f32, f32, f32)> {
+    let usage = cpu_usage()?;
+    Some((usage * 0.7, usage * 0.3, 100.0 - usage))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn cpu_breakdown() -> Option<(f32, f32, f32)> {
+    None
+}
+
+fn apply_hw_metrics(state: &mut SamplerState) {
+    let should_refresh = state
+        .last_hw_at
+        .map(|at| at.elapsed().as_secs() >= 30)
+        .unwrap_or(true);
+
+    if !should_refresh {
+        return;
+    }
+
+    state.last_hw_at = Some(Instant::now());
+
+    #[cfg(target_os = "macos")]
+    {
+        if state.powermetrics_disabled {
+            return;
+        }
+        if let Some((cpu_temp, fan_rpm, disk_temps)) = read_powermetrics() {
+            state.cached_cpu_temp = cpu_temp;
+            state.cached_fan_rpm = fan_rpm;
+            state.cached_disk_temps = disk_temps;
+        } else {
+            state.powermetrics_disabled = true;
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_powermetrics() -> Option<(Option<f32>, Option<u32>, HashMap<String, f32>)> {
+    let output = Command::new("powermetrics")
+        .args(["--samplers", "smc,thermal", "-i", "1000", "-n", "1"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let mut cpu_temp = None;
+    let mut fan_rpm = None;
+    let mut disk_temps = HashMap::new();
+
+    for line in text.lines() {
+        let lower = line.to_lowercase();
+        if lower.contains("cpu die temperature") || lower.contains("cpu avg temperature") {
+            if let Some(value) = extract_first_number(line) {
+                cpu_temp = Some(value);
+            }
+        }
+        if lower.contains("fan") && lower.contains("rpm") {
+            if let Some(value) = extract_first_number(line) {
+                fan_rpm = Some(value.round() as u32);
+            }
+        }
+        if lower.contains("disk") && lower.contains("temp") {
+            if let Some(value) = extract_first_number(line) {
+                disk_temps.insert("disk0".to_string(), value);
+            }
+        }
+    }
+
+    Some((cpu_temp, fan_rpm, disk_temps))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_powermetrics() -> Option<(Option<f32>, Option<u32>, HashMap<String, f32>)> {
+    None
+}
+
+fn extract_first_number(line: &str) -> Option<f32> {
+    let mut token = String::new();
+    for ch in line.chars() {
+        if ch.is_ascii_digit() || ch == '.' {
+            token.push(ch);
+        } else if !token.is_empty() {
+            break;
+        }
+    }
+    token.parse().ok()
+}
+
+fn apply_disk_io_rates(state: &mut SamplerState, disks: &mut [DiskInfo]) {
+    let samples = sample_disk_io();
+    let now = Instant::now();
+
+    for disk in disks.iter_mut() {
+        let key = disk_key_for_mount(&disk.mount);
+        let (read_bytes, write_bytes) = if let Some(current) = samples.get(&key) {
+            if let Some(previous) = state.last_disk_io.get(&key) {
+                let elapsed = now
+                    .duration_since(previous.at)
+                    .as_secs_f64()
+                    .max(0.001);
+                let read_delta = current.read_bytes.saturating_sub(previous.read_bytes);
+                let write_delta = current.write_bytes.saturating_sub(previous.write_bytes);
+                (
+                    (read_delta as f64 / elapsed) as u64,
+                    (write_delta as f64 / elapsed) as u64,
+                )
+            } else {
+                (0, 0)
+            }
+        } else {
+            (0, 0)
+        };
+
+        disk.read_bytes_per_sec = read_bytes;
+        disk.write_bytes_per_sec = write_bytes;
+
+        if let Some(temp) = state.cached_disk_temps.get(&key) {
+            disk.temp_c = Some(*temp);
+        }
+
+        if let Some(current) = samples.get(&key) {
+            state.last_disk_io.insert(
+                key,
+                DiskIoSample {
+                    read_bytes: current.read_bytes,
+                    write_bytes: current.write_bytes,
+                    at: now,
+                },
+            );
+        }
+    }
+}
+
+fn disk_key_for_mount(mount: &str) -> String {
+    if mount == "/" {
+        "disk0".to_string()
+    } else {
+        mount
+            .rsplit('/')
+            .next()
+            .unwrap_or(mount)
+            .chars()
+            .take(12)
+            .collect()
+    }
+}
+
+struct IoCounters {
+    read_bytes: u64,
+    write_bytes: u64,
+}
+
+fn sample_disk_io() -> HashMap<String, IoCounters> {
+    #[cfg(target_os = "macos")]
+    {
+        return macos_disk_io_samples();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return linux_disk_io_samples();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        HashMap::new()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_disk_io_samples() -> HashMap<String, IoCounters> {
+    let output = match command_stdout("iostat", &["-Id", "disk0", "1", "1"]) {
+        Some(value) => value,
+        None => command_stdout("iostat", &["-d", "disk0", "1", "1"]).unwrap_or_default(),
+    };
+    if output.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut result = HashMap::new();
+    let lines: Vec<&str> = output.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains("disk") || line.contains("KB/t") {
+            continue;
+        }
+        let device = line.split_whitespace().next().unwrap_or("disk0");
+        if let Some(data_line) = lines.get(index + 1) {
+            let cols: Vec<&str> = data_line.split_whitespace().collect();
+            if cols.len() >= 2 {
+                let read_kbs = cols[0].parse::<f64>().unwrap_or(0.0);
+                let write_kbs = cols[1].parse::<f64>().unwrap_or(0.0);
+                result.insert(
+                    device.to_string(),
+                    IoCounters {
+                        read_bytes: (read_kbs * 1024.0) as u64,
+                        write_bytes: (write_kbs * 1024.0) as u64,
+                    },
+                );
+                continue;
+            }
+            if cols.len() == 1 {
+                let mbps = cols[0].parse::<f64>().unwrap_or(0.0);
+                let bytes = (mbps * 1024.0 * 1024.0) as u64;
+                result.insert(
+                    device.to_string(),
+                    IoCounters {
+                        read_bytes: bytes / 2,
+                        write_bytes: bytes / 2,
+                    },
+                );
+            }
+        }
+    }
+    result
+}
+
+#[cfg(target_os = "linux")]
+fn linux_disk_io_samples() -> HashMap<String, IoCounters> {
+    let content = std::fs::read_to_string("/proc/diskstats").ok();
+    let mut result = HashMap::new();
+    if let Some(content) = content {
+        for line in content.lines() {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            if cols.len() < 14 {
+                continue;
+            }
+            let name = cols[2].to_string();
+            if !name.starts_with("sd") && !name.starts_with("nvme") {
+                continue;
+            }
+            let read_sectors = cols[5].parse::<u64>().unwrap_or(0);
+            let write_sectors = cols[9].parse::<u64>().unwrap_or(0);
+            result.insert(
+                name,
+                IoCounters {
+                    read_bytes: read_sectors.saturating_mul(512),
+                    write_bytes: write_sectors.saturating_mul(512),
+                },
+            );
+        }
+    }
+    result
+}
+
 fn disk_usage() -> CoreResult<Vec<DiskInfo>> {
     let output = command_stdout("df", &["-kP"])
         .ok_or_else(|| "Unable to read disk usage from the operating system".to_string())?;
@@ -92,6 +458,9 @@ fn disk_usage() -> CoreResult<Vec<DiskInfo>> {
             free,
             total,
             used_percent: percent(used, total),
+            read_bytes_per_sec: 0,
+            write_bytes_per_sec: 0,
+            temp_c: None,
         });
     }
 
@@ -112,7 +481,7 @@ fn disk_usage() -> CoreResult<Vec<DiskInfo>> {
 
 fn short_disk_name(device: &str, mount: &str) -> String {
     if mount == "/" {
-        return "System".to_string();
+        return "Macintosh HD".to_string();
     }
     mount
         .rsplit('/')
@@ -126,15 +495,8 @@ fn short_disk_name(device: &str, mount: &str) -> String {
 
 #[cfg(target_os = "linux")]
 fn cpu_usage() -> Option<f32> {
-    let first = read_linux_cpu_sample()?;
-    std::thread::sleep(std::time::Duration::from_millis(120));
-    let second = read_linux_cpu_sample()?;
-    let total = second.0.checked_sub(first.0)?;
-    let idle = second.1.checked_sub(first.1)?;
-    if total == 0 {
-        return Some(0.0);
-    }
-    Some((((total - idle) as f64 / total as f64) * 100.0) as f32)
+    let breakdown = cpu_breakdown()?;
+    Some((breakdown.0 + breakdown.1).clamp(0.0, 100.0))
 }
 
 #[cfg(target_os = "linux")]
@@ -157,12 +519,8 @@ fn read_linux_cpu_sample() -> Option<(u64, u64)> {
 
 #[cfg(target_os = "macos")]
 fn cpu_usage() -> Option<f32> {
-    let output = command_stdout("top", &["-l", "1", "-n", "0", "-s", "0"])?;
-    let line = output.lines().find(|line| line.contains("CPU usage"))?;
-    let idle_part = line.split(',').find(|part| part.contains("idle"))?.trim();
-    let idle_text = idle_part.split_whitespace().next()?.trim_end_matches('%');
-    let idle = idle_text.parse::<f32>().ok()?;
-    Some((100.0 - idle).clamp(0.0, 100.0))
+    let breakdown = cpu_breakdown()?;
+    Some((breakdown.0 + breakdown.1).clamp(0.0, 100.0))
 }
 
 #[cfg(target_os = "windows")]
@@ -187,7 +545,6 @@ fn cpu_usage() -> Option<f32> {
     None
 }
 
-#[cfg(target_os = "linux")]
 #[cfg(target_os = "linux")]
 fn memory_snapshot() -> MemorySnapshot {
     let Some((used, total, available, cached)) = linux_memory_bytes() else {
@@ -437,23 +794,118 @@ fn parse_process_line(line: &str) -> Option<ProcessInfo> {
     Some(ProcessInfo { name, cpu })
 }
 
-#[cfg(target_os = "macos")]
-fn network_info() -> Option<NetworkInfo> {
-    for name in ["en0", "en1", "bridge0"] {
-        if let Some(ip) = command_stdout("ipconfig", &["getifaddr", name])
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-        {
-            return Some(NetworkInfo {
-                name: name.to_string(),
-                ip,
-            });
+fn network_info_with_rates(state: &mut SamplerState) -> Option<NetworkInfo> {
+    let current = sample_network_counters()?;
+    let now = Instant::now();
+    let (rx_bytes_per_sec, tx_bytes_per_sec) = if let Some(previous) = &state.last_net {
+        if previous.iface == current.iface {
+            let elapsed = now.duration_since(previous.at).as_secs_f64().max(0.001);
+            let rx_delta = current.rx_bytes.saturating_sub(previous.rx_bytes);
+            let tx_delta = current.tx_bytes.saturating_sub(previous.tx_bytes);
+            (
+                (rx_delta as f64 / elapsed) as u64,
+                (tx_delta as f64 / elapsed) as u64,
+            )
+        } else {
+            (0, 0)
         }
+    } else {
+        (0, 0)
+    };
+
+    state.last_net = Some(NetSample {
+        iface: current.iface.clone(),
+        rx_bytes: current.rx_bytes,
+        tx_bytes: current.tx_bytes,
+        at: now,
+    });
+
+    Some(NetworkInfo {
+        name: current.iface,
+        ip: current.ip,
+        rx_bytes_per_sec,
+        tx_bytes_per_sec,
+    })
+}
+
+struct NetworkCounters {
+    iface: String,
+    ip: String,
+    rx_bytes: u64,
+    tx_bytes: u64,
+}
+
+fn sample_network_counters() -> Option<NetworkCounters> {
+    #[cfg(target_os = "macos")]
+    {
+        return macos_network_counters();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return linux_network_counters();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_network_counters() -> Option<NetworkCounters> {
+    for name in ["en0", "en1", "bridge0"] {
+        let ip = command_stdout("ipconfig", &["getifaddr", name])
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let Some(ip) = ip else {
+            continue;
+        };
+        let (rx_bytes, tx_bytes) = netstat_iface_bytes(name).unwrap_or((0, 0));
+        return Some(NetworkCounters {
+            iface: name.to_string(),
+            ip,
+            rx_bytes,
+            tx_bytes,
+        });
     }
     None
 }
 
-#[cfg(not(target_os = "macos"))]
-fn network_info() -> Option<NetworkInfo> {
+#[cfg(target_os = "macos")]
+fn netstat_iface_bytes(iface: &str) -> Option<(u64, u64)> {
+    let output = command_stdout("netstat", &["-ibn"])?;
+    for line in output.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 10 {
+            continue;
+        }
+        if cols[0] != iface {
+            continue;
+        }
+        let rx = cols[6].parse::<u64>().ok()?;
+        let tx = cols[9].parse::<u64>().ok()?;
+        return Some((rx, tx));
+    }
     None
+}
+
+#[cfg(target_os = "linux")]
+fn linux_network_counters() -> Option<NetworkCounters> {
+    let routes = std::fs::read_to_string("/proc/net/route").ok()?;
+    let iface = routes
+        .lines()
+        .skip(1)
+        .find(|line| line.contains("\t00000000\t"))
+        .and_then(|line| line.split_whitespace().next())
+        .map(|value| value.to_string())?;
+    let stats = std::fs::read_to_string(format!("/sys/class/net/{iface}/statistics/rx_bytes")).ok();
+    let tx_stats =
+        std::fs::read_to_string(format!("/sys/class/net/{iface}/statistics/tx_bytes")).ok();
+    let rx_bytes = stats?.trim().parse().ok()?;
+    let tx_bytes = tx_stats?.trim().parse().ok()?;
+    Some(NetworkCounters {
+        iface: iface.clone(),
+        ip: "0.0.0.0".to_string(),
+        rx_bytes,
+        tx_bytes,
+    })
 }
