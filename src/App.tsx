@@ -72,6 +72,29 @@ type CleanFailure = {
 type CleanResult = {
   removed: CleanEntry[];
   skipped: CleanFailure[];
+  freed_total: number;
+};
+
+type CleanCategory = {
+  id: string;
+  title: string;
+  description: string;
+  risk: "safe" | "review";
+  roots: string[];
+  items: CleanEntry[];
+  total_freed: number;
+  item_count: number;
+};
+
+type CleanSection = {
+  name: string;
+  categories: CleanCategory[];
+};
+
+type CleanScanResult = {
+  sections: CleanSection[];
+  total_freed: number;
+  total_items: number;
 };
 
 type OptimizeResult = {
@@ -87,7 +110,6 @@ type AnalysisNode = {
 };
 
 type OperationState = "idle" | "loading" | "success" | "error";
-type OperationSummary = { kind: "empty" } | { kind: "clean"; result: CleanResult } | { kind: "optimize"; result: OptimizeResult };
 type TabId = "overview" | "cleanup" | "analyse";
 type CpuSample = [number, number, number];
 
@@ -95,6 +117,7 @@ type ConfirmationRequest = {
   title: string;
   description: string;
   confirmLabel: string;
+  destructive?: boolean;
   action: () => Promise<void>;
 };
 
@@ -107,7 +130,6 @@ const APP_VERSION = "0.1.0";
 const GITHUB_URL = "https://github.com/heqk/CacheBar";
 const SETTINGS_KEY = "cachebar-settings";
 const CPU_HISTORY_LEN = 60;
-const emptySummary: OperationSummary = { kind: "empty" };
 
 const defaultSettings: AppSettings = {
   refreshIntervalMs: 1000,
@@ -156,6 +178,14 @@ function formatTemp(value: number | null | undefined): string {
     return "--℃";
   }
   return `${value.toFixed(1)}℃`;
+}
+
+function shortPath(path: string): string {
+  const parts = path.split("/");
+  if (parts.length <= 5) {
+    return path;
+  }
+  return `…/${parts.slice(-3).join("/")}`;
 }
 
 function errorMessage(error: unknown): string {
@@ -358,7 +388,7 @@ function RamCard({ status, onFreeUp }: { status: StatusSnapshot | null; onFreeUp
   );
 }
 
-function FanCard({ fanRpm }: { fanRpm: number | null }) {
+function FanCard({ fanRpm, hwEnabled }: { fanRpm: number | null; hwEnabled: boolean }) {
   return (
     <GlassCard>
       <div className="flex items-center gap-2">
@@ -367,7 +397,9 @@ function FanCard({ fanRpm }: { fanRpm: number | null }) {
       </div>
       <div className="mt-3 text-lg font-black text-white">{fanRpm != null ? `${fanRpm} RPM` : "-- RPM"}</div>
       {fanRpm == null ? (
-        <p className="mt-1 text-[10px] font-semibold text-slate-400">需 sudo 启动以读取风扇转速</p>
+        <p className="mt-1 text-[10px] font-semibold text-slate-400">
+          {hwEnabled ? "需 sudo 启动以读取风扇转速" : "已在设置中关闭温度采样"}
+        </p>
       ) : null}
     </GlassCard>
   );
@@ -402,20 +434,22 @@ function InternetCard({ network }: { network: NetworkInfo | null }) {
 function OverviewTab({
   status,
   cpuHistory,
+  hwEnabled,
   onFreeUp,
 }: {
   status: StatusSnapshot | null;
   cpuHistory: CpuSample[];
+  hwEnabled: boolean;
   onFreeUp: () => void;
 }) {
   const rootDisk = status?.disks.find((disk) => disk.mount === "/") ?? status?.disks[0];
 
   return (
-    <section className="grid grid-cols-2 gap-2">
+    <section className="grid grid-cols-2 gap-2 p-0.5">
       <CpuCard status={status} history={cpuHistory} />
       <DiskCard disk={rootDisk} />
       <RamCard status={status} onFreeUp={onFreeUp} />
-      <FanCard fanRpm={status?.fan_rpm ?? null} />
+      <FanCard fanRpm={status?.fan_rpm ?? null} hwEnabled={hwEnabled} />
       <InternetCard network={status?.network ?? null} />
     </section>
   );
@@ -457,24 +491,46 @@ function BottomMenu({
   );
 }
 
+async function openExternal(url: string) {
+  try {
+    await invoke("open_url", { url });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function SettingsDialog({
   open,
   settings,
   busy,
+  hwEnabledRuntime,
   onClose,
   onSave,
 }: {
   open: boolean;
   settings: AppSettings;
   busy: boolean;
+  hwEnabledRuntime: boolean;
   onClose: () => void;
   onSave: (next: AppSettings) => void;
 }) {
   const [draft, setDraft] = useState(settings);
+  const [copied, setCopied] = useState(false);
+  const sudoCommand = "sudo /Applications/CacheBar.app/Contents/MacOS/CacheBar";
 
   useEffect(() => {
     if (open) {
       setDraft(settings);
+      setCopied(false);
     }
   }, [open, settings]);
 
@@ -485,6 +541,7 @@ function SettingsDialog({
   return (
     <ModalShell onClose={onClose}>
       <h2 className="text-base font-black text-white">Settings</h2>
+
       <label className="mt-4 block text-xs font-semibold text-slate-300">
         刷新间隔（秒）
         <input
@@ -501,15 +558,47 @@ function SettingsDialog({
           className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
         />
       </label>
-      <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-300">
-        <input
-          type="checkbox"
-          checked={draft.enableHwMetrics}
-          onChange={(event) => setDraft((current) => ({ ...current, enableHwMetrics: event.target.checked }))}
-          className="h-4 w-4 accent-sky-500"
-        />
-        尝试读取温度 / 风扇（需 sudo 启动 CacheBar）
-      </label>
+
+      <div className="mt-4 rounded-xl bg-slate-950/60 p-3 ring-1 ring-white/5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-bold text-white">温度 / 风扇采样</span>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+              hwEnabledRuntime ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-700/60 text-slate-300"
+            }`}
+          >
+            {hwEnabledRuntime ? "已生效" : "占位 --"}
+          </span>
+        </div>
+        <label className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-300">
+          <input
+            type="checkbox"
+            checked={draft.enableHwMetrics}
+            onChange={(event) => setDraft((current) => ({ ...current, enableHwMetrics: event.target.checked }))}
+            className="h-4 w-4 accent-sky-500"
+          />
+          允许尝试通过 powermetrics 读取
+        </label>
+        <p className="mt-2 text-[11px] leading-4 text-slate-400">
+          powermetrics 需要 root 权限。CacheBar 不会自动请求 sudo，请通过下面的命令以 sudo 启动一次：
+        </p>
+        <div className="mt-2 flex items-center gap-2 rounded-lg bg-black/40 px-2 py-1.5 text-[11px] font-mono text-slate-200">
+          <span className="flex-1 truncate">{sudoCommand}</span>
+          <button
+            type="button"
+            onClick={async () => {
+              if (await copyToClipboard(sudoCommand)) {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1500);
+              }
+            }}
+            className="rounded-md bg-sky-500 px-2 py-0.5 text-[10px] font-bold text-white"
+          >
+            {copied ? "已复制" : "复制"}
+          </button>
+        </div>
+      </div>
+
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button type="button" disabled={busy} onClick={onClose} className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white">
           取消
@@ -536,13 +625,25 @@ function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
     <ModalShell onClose={onClose}>
       <h2 className="text-base font-black text-white">About CacheBar</h2>
       <p className="mt-2 text-sm font-semibold text-slate-200">版本 {APP_VERSION}</p>
-      <p className="mt-2 text-xs leading-5 text-slate-300">macOS 菜单栏系统监控与缓存清理工具。</p>
-      <a href={GITHUB_URL} className="mt-3 inline-block text-sm font-bold text-sky-300 hover:text-sky-200">
-        GitHub →
-      </a>
-      <button type="button" onClick={onClose} className="mt-4 w-full rounded-xl bg-sky-500 px-3 py-2 text-sm font-bold text-white">
-        关闭
-      </button>
+      <p className="mt-2 text-xs leading-5 text-slate-300">
+        macOS 菜单栏系统监控与缓存清理工具。结合 iStat 风格的硬件面板与 mole 风格的分类清理。
+      </p>
+      <div className="mt-3 flex items-center gap-2 text-xs">
+        <span className="text-slate-400">GitHub:</span>
+        <code className="flex-1 truncate rounded bg-black/40 px-2 py-1 font-mono text-sky-300">{GITHUB_URL}</code>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => void openExternal(GITHUB_URL)}
+          className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white"
+        >
+          浏览器打开
+        </button>
+        <button type="button" onClick={onClose} className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-bold text-white">
+          关闭
+        </button>
+      </div>
     </ModalShell>
   );
 }
@@ -565,6 +666,7 @@ function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  destructive = false,
   busy,
   onCancel,
   onConfirm,
@@ -573,6 +675,7 @@ function ConfirmDialog({
   title: string;
   description: string;
   confirmLabel: string;
+  destructive?: boolean;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -589,7 +692,14 @@ function ConfirmDialog({
         <button type="button" disabled={busy} onClick={onCancel} className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">
           取消
         </button>
-        <button type="button" disabled={busy} onClick={onConfirm} className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onConfirm}
+          className={`rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-50 ${
+            destructive ? "bg-rose-500" : "bg-sky-500"
+          }`}
+        >
           {busy ? "处理中..." : confirmLabel}
         </button>
       </div>
@@ -597,47 +707,74 @@ function ConfirmDialog({
   );
 }
 
+function RiskBadge({ risk }: { risk: "safe" | "review" }) {
+  if (risk === "review") {
+    return (
+      <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+        请确认
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-200">
+      安全
+    </span>
+  );
+}
+
 function CleanupTab({
   busy,
   message,
-  summary,
   operationState,
-  onScan,
-  cleanupTargets,
+  scanResult,
+  lastCleanResult,
   selectedPaths,
+  expandedCategoryIds,
+  onScan,
+  onTogglePath,
+  onToggleCategory,
+  onToggleExpand,
   onSelectAll,
   onSelectNone,
-  onTogglePath,
   onConfirmClean,
 }: {
   busy: boolean;
   message: string;
-  summary: OperationSummary;
   operationState: OperationState;
-  onScan: () => void;
-  cleanupTargets: CleanEntry[];
+  scanResult: CleanScanResult | null;
+  lastCleanResult: CleanResult | null;
   selectedPaths: Set<string>;
+  expandedCategoryIds: Set<string>;
+  onScan: () => void;
+  onTogglePath: (path: string) => void;
+  onToggleCategory: (category: CleanCategory) => void;
+  onToggleExpand: (id: string) => void;
   onSelectAll: () => void;
   onSelectNone: () => void;
-  onTogglePath: (path: string) => void;
   onConfirmClean: () => void;
 }) {
-  const groupedEntries = cleanupTargets.reduce<Record<string, CleanEntry[]>>((groups, entry) => {
-    const category = entry.category || "其他";
-    return { ...groups, [category]: [...(groups[category] ?? []), entry] };
-  }, {});
-  const selectedTotal = cleanupTargets.filter((entry) => selectedPaths.has(entry.path)).reduce((sum, entry) => sum + entry.freed, 0);
+  const allItems = useMemo(
+    () => (scanResult?.sections ?? []).flatMap((section) => section.categories.flatMap((category) => category.items)),
+    [scanResult],
+  );
+  const selectedTotal = allItems.filter((item) => selectedPaths.has(item.path)).reduce((sum, item) => sum + item.freed, 0);
+  const noResults = scanResult != null && scanResult.total_items === 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex h-full flex-col gap-2">
       <div className="flex gap-2">
-        <button type="button" disabled={busy} onClick={onScan} className="flex-1 rounded-xl bg-sky-500 px-3 py-2 text-sm font-black text-white disabled:opacity-50">
-          {busy ? "扫描中..." : "扫描缓存"}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onScan}
+          className="flex-1 rounded-xl bg-sky-500 px-3 py-2 text-sm font-black text-white disabled:opacity-50"
+        >
+          {busy && operationState === "loading" ? "扫描中..." : scanResult ? "重新扫描" : "扫描可清理项"}
         </button>
-        {cleanupTargets.length > 0 ? (
+        {scanResult && allItems.length > 0 ? (
           <>
             <button type="button" onClick={onSelectAll} className="rounded-xl bg-white/10 px-2.5 py-2 text-xs font-bold text-white">
-              全选
+              全选安全项
             </button>
             <button type="button" onClick={onSelectNone} className="rounded-xl bg-white/10 px-2.5 py-2 text-xs font-bold text-white">
               清空
@@ -646,43 +783,188 @@ function CleanupTab({
         ) : null}
       </div>
 
-      <OperationNotice summary={summary} state={operationState} message={message} />
+      {operationState === "loading" || operationState === "error" ? (
+        <div
+          className={`rounded-xl px-3 py-2 text-xs font-bold ${
+            operationState === "error" ? "bg-rose-500/20 text-rose-100" : "bg-sky-500/20 text-sky-100"
+          }`}
+        >
+          {message}
+        </div>
+      ) : null}
 
-      {cleanupTargets.length > 0 ? (
-        <>
-          <div className="text-xs font-bold text-slate-200">
-            已选 {selectedPaths.size} 项 · {formatBytes(selectedTotal)}
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-950/60 p-2">
-            {Object.entries(groupedEntries).map(([category, items]) => (
-              <div key={category} className="mb-3 last:mb-0">
-                <div className="mb-1 text-[11px] font-black uppercase text-slate-400">{category}</div>
-                <div className="space-y-1">
-                  {items.map((entry) => (
-                    <label key={entry.path} className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2 rounded-xl bg-white/5 px-2 py-1.5">
-                      <input type="checkbox" checked={selectedPaths.has(entry.path)} onChange={() => onTogglePath(entry.path)} className="h-4 w-4 accent-sky-500" />
-                      <span className="min-w-0 truncate text-[11px] text-slate-100" title={entry.path}>
-                        {entry.path}
-                      </span>
-                      <span className="text-[11px] font-bold text-sky-300">{formatBytes(entry.freed)}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
+      {lastCleanResult ? (
+        <div className="rounded-xl bg-emerald-500/20 px-3 py-2 text-xs font-bold text-emerald-100">
+          已释放 {formatBytes(lastCleanResult.freed_total)} · 删除 {lastCleanResult.removed.length} 项
+          {lastCleanResult.skipped.length > 0 ? ` · 跳过 ${lastCleanResult.skipped.length} 项` : ""}
+        </div>
+      ) : null}
+
+      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-950/60 p-2 ring-1 ring-white/5">
+        {!scanResult ? (
+          <EmptyHint />
+        ) : noResults ? (
+          <div className="py-10 text-center text-xs text-slate-400">没有发现可清理项 🎉</div>
+        ) : (
+          <SectionList
+            scanResult={scanResult}
+            selectedPaths={selectedPaths}
+            expandedCategoryIds={expandedCategoryIds}
+            onTogglePath={onTogglePath}
+            onToggleCategory={onToggleCategory}
+            onToggleExpand={onToggleExpand}
+          />
+        )}
+      </div>
+
+      {scanResult && allItems.length > 0 ? (
+        <div className="rounded-xl bg-slate-900/80 p-2 ring-1 ring-white/10">
+          <div className="mb-2 flex items-center justify-between text-xs font-bold">
+            <span className="text-slate-200">
+              已选 {selectedPaths.size} 项 · {formatBytes(selectedTotal)}
+            </span>
+            <span className="text-slate-400">合计可清理 {formatBytes(scanResult.total_freed)}</span>
           </div>
           <button
             type="button"
             disabled={busy || selectedPaths.size === 0}
             onClick={onConfirmClean}
-            className="rounded-xl bg-rose-500 px-3 py-2 text-sm font-black text-white disabled:opacity-50"
+            className="w-full rounded-xl bg-rose-500 px-3 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? "删除中..." : "确认删除所选项"}
+            {busy && operationState === "loading" ? "删除中..." : `确认删除所选 ${selectedPaths.size} 项`}
           </button>
-        </>
-      ) : (
-        <p className="text-xs font-semibold text-slate-400">点击「扫描缓存」列出可清理项，勾选后删除。</p>
-      )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EmptyHint() {
+  return (
+    <div className="py-10 text-center text-xs text-slate-400">
+      点击「扫描可清理项」检查系统中的缓存。
+      <br />
+      所有项目都会按类别列出，附描述与安全等级。
+    </div>
+  );
+}
+
+function SectionList({
+  scanResult,
+  selectedPaths,
+  expandedCategoryIds,
+  onTogglePath,
+  onToggleCategory,
+  onToggleExpand,
+}: {
+  scanResult: CleanScanResult;
+  selectedPaths: Set<string>;
+  expandedCategoryIds: Set<string>;
+  onTogglePath: (path: string) => void;
+  onToggleCategory: (category: CleanCategory) => void;
+  onToggleExpand: (id: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {scanResult.sections.map((section) => (
+        <div key={section.name}>
+          <div className="mb-1 flex items-center gap-2 px-1">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">{section.name}</span>
+            <div className="h-px flex-1 bg-white/5" />
+          </div>
+          <div className="space-y-2">
+            {section.categories.map((category) => (
+              <CategoryRow
+                key={category.id}
+                category={category}
+                expanded={expandedCategoryIds.has(category.id)}
+                selectedPaths={selectedPaths}
+                onTogglePath={onTogglePath}
+                onToggleCategory={() => onToggleCategory(category)}
+                onToggleExpand={() => onToggleExpand(category.id)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CategoryRow({
+  category,
+  expanded,
+  selectedPaths,
+  onTogglePath,
+  onToggleCategory,
+  onToggleExpand,
+}: {
+  category: CleanCategory;
+  expanded: boolean;
+  selectedPaths: Set<string>;
+  onTogglePath: (path: string) => void;
+  onToggleCategory: () => void;
+  onToggleExpand: () => void;
+}) {
+  const selectedCount = category.items.filter((item) => selectedPaths.has(item.path)).length;
+  const allSelected = selectedCount === category.items.length && category.items.length > 0;
+  const partial = selectedCount > 0 && !allSelected;
+
+  return (
+    <div className="rounded-xl bg-slate-800/60 ring-1 ring-white/5">
+      <div className="flex items-center gap-2 px-2 py-2">
+        <input
+          type="checkbox"
+          checked={allSelected}
+          ref={(input) => {
+            if (input) input.indeterminate = partial;
+          }}
+          onChange={onToggleCategory}
+          className="h-4 w-4 shrink-0 accent-sky-500"
+        />
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="flex flex-1 min-w-0 items-center gap-2 text-left"
+        >
+          <span className="w-3 text-xs text-slate-400">{expanded ? "▾" : "▸"}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-bold text-white">{category.title}</span>
+              <RiskBadge risk={category.risk} />
+            </div>
+            <p className="mt-0.5 truncate text-[10px] text-slate-400" title={category.description}>
+              {category.description}
+            </p>
+          </div>
+          <div className="shrink-0 text-right text-[11px] font-bold">
+            <div className="text-sky-300">{formatBytes(category.total_freed)}</div>
+            <div className="text-slate-400">{category.item_count} 项</div>
+          </div>
+        </button>
+      </div>
+
+      {expanded ? (
+        <div className="space-y-1 border-t border-white/5 px-2 py-2">
+          {category.items.map((item) => (
+            <label
+              key={item.path}
+              className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg bg-slate-900/60 px-2 py-1.5 hover:bg-slate-900/90"
+            >
+              <input
+                type="checkbox"
+                checked={selectedPaths.has(item.path)}
+                onChange={() => onTogglePath(item.path)}
+                className="h-4 w-4 accent-sky-500"
+              />
+              <span className="min-w-0 truncate text-[11px] text-slate-100" title={item.path}>
+                {shortPath(item.path)}
+              </span>
+              <span className="text-[11px] font-bold text-sky-300">{formatBytes(item.freed)}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -699,7 +981,7 @@ function AnalyseTab({
   onPick: () => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex h-full flex-col gap-2">
       <button
         type="button"
         disabled={busy}
@@ -709,7 +991,7 @@ function AnalyseTab({
         {busy ? "扫描中..." : nodes.length > 0 ? "重新选择文件夹" : "选择文件夹分析"}
       </button>
       {message ? <p className="text-xs font-semibold text-slate-300">{message}</p> : null}
-      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-950/60 p-2">
+      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-950/60 p-2 ring-1 ring-white/5">
         {nodes.length > 0 ? <AnalysisTree nodes={nodes} /> : <div className="py-8 text-center text-xs text-slate-400">还没有选择文件夹</div>}
       </div>
     </div>
@@ -755,32 +1037,6 @@ function AnalysisTreeNode({ node, depth }: { node: AnalysisNode; depth: number }
   );
 }
 
-function OperationNotice({ summary, state, message }: { summary: OperationSummary; state: OperationState; message: string }) {
-  if (state === "loading" || state === "error") {
-    return (
-      <div className={`rounded-xl px-3 py-2 text-xs font-bold ${state === "error" ? "bg-rose-500/20 text-rose-100" : "bg-sky-500/20 text-sky-100"}`}>
-        {message}
-      </div>
-    );
-  }
-
-  if (summary.kind === "clean") {
-    const total = summary.result.removed.reduce((sum, entry) => sum + entry.freed, 0);
-    const skipped = summary.result.skipped.length;
-    return (
-      <div className="rounded-xl bg-emerald-500/20 px-3 py-2 text-xs font-bold text-emerald-100">
-        已清理 {formatBytes(total)} · {summary.result.removed.length} 项{skipped > 0 ? `，跳过 ${skipped} 项` : ""}
-      </div>
-    );
-  }
-
-  if (summary.kind === "optimize") {
-    return <div className="rounded-xl bg-emerald-500/20 px-3 py-2 text-xs font-bold text-emerald-100">已执行 {summary.result.tasks.length} 个优化任务</div>;
-  }
-
-  return null;
-}
-
 export default function App() {
   const [status, setStatus] = useState<StatusSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -789,15 +1045,17 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [operationState, setOperationState] = useState<OperationState>("idle");
   const [message, setMessage] = useState("Ready");
-  const [summary, setSummary] = useState<OperationSummary>(emptySummary);
   const [analysisNodes, setAnalysisNodes] = useState<AnalysisNode[]>([]);
-  const [cleanupTargets, setCleanupTargets] = useState<CleanEntry[]>([]);
+  const [scanResult, setScanResult] = useState<CleanScanResult | null>(null);
+  const [lastCleanResult, setLastCleanResult] = useState<CleanResult | null>(null);
   const [selectedCleanupPaths, setSelectedCleanupPaths] = useState<Set<string>>(new Set());
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const cpuHistoryRef = useRef<CpuSample[]>([]);
   const [cpuHistory, setCpuHistory] = useState<CpuSample[]>([]);
 
   const busy = operationState === "loading";
+  const hwEnabledRuntime = status?.cpu_temp_c != null || status?.fan_rpm != null;
 
   const pushCpuSample = useCallback((snapshot: StatusSnapshot) => {
     const next: CpuSample = [snapshot.cpu_user, snapshot.cpu_system, snapshot.cpu_idle];
@@ -850,40 +1108,31 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [refreshStatus, handleQuit]);
 
-  const requestAction = useCallback(
-    <T,>(title: string, description: string, confirmLabel: string, action: () => Promise<T>, onSuccess: (value: T) => OperationSummary) => {
-      setConfirmation({
-        title,
-        description,
-        confirmLabel,
-        action: async () => {
-          setOperationState("loading");
-          setMessage("Working...");
-          try {
-            const value = await action();
-            setSummary(onSuccess(value));
-            setOperationState("success");
-            setMessage("Done");
-            void refreshStatus();
-          } catch (error) {
-            setOperationState("error");
-            setMessage(errorMessage(error));
-          }
-        },
-      });
-    },
-    [refreshStatus],
-  );
-
-  const handleClean = useCallback(() => {
+  const handleScan = useCallback(() => {
     setOperationState("loading");
-    setMessage("Scanning cleanup candidates...");
-    void invoke<CleanEntry[]>("scan_clean_targets")
-      .then((entries) => {
-        setCleanupTargets(entries);
-        setSelectedCleanupPaths(new Set(entries.map((entry) => entry.path)));
+    setMessage("正在扫描可清理项...");
+    setLastCleanResult(null);
+    void invoke<CleanScanResult>("scan_clean_targets")
+      .then((result) => {
+        setScanResult(result);
+        const safeItemPaths = new Set<string>();
+        const expandIds = new Set<string>();
+        for (const section of result.sections) {
+          for (const category of section.categories) {
+            if (category.risk === "safe") {
+              for (const item of category.items) {
+                safeItemPaths.add(item.path);
+              }
+            }
+            if (category.total_freed > 50 * 1024 * 1024) {
+              expandIds.add(category.id);
+            }
+          }
+        }
+        setSelectedCleanupPaths(safeItemPaths);
+        setExpandedCategoryIds(expandIds);
         setOperationState("idle");
-        setMessage(entries.length > 0 ? "Review cleanup list" : "Nothing to clean");
+        setMessage(result.total_items > 0 ? `扫描完成，共 ${result.total_items} 项 · ${formatBytes(result.total_freed)}` : "暂无可清理项");
       })
       .catch((error) => {
         setOperationState("error");
@@ -891,37 +1140,120 @@ export default function App() {
       });
   }, []);
 
+  const handleTogglePath = useCallback((path: string) => {
+    setSelectedCleanupPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleCategory = useCallback((category: CleanCategory) => {
+    setSelectedCleanupPaths((current) => {
+      const next = new Set(current);
+      const allSelected = category.items.every((item) => next.has(item.path));
+      if (allSelected) {
+        for (const item of category.items) {
+          next.delete(item.path);
+        }
+      } else {
+        for (const item of category.items) {
+          next.add(item.path);
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleExpand = useCallback((id: string) => {
+    setExpandedCategoryIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectAllSafe = useCallback(() => {
+    if (!scanResult) {
+      return;
+    }
+    const safePaths = new Set<string>();
+    for (const section of scanResult.sections) {
+      for (const category of section.categories) {
+        if (category.risk === "safe") {
+          for (const item of category.items) {
+            safePaths.add(item.path);
+          }
+        }
+      }
+    }
+    setSelectedCleanupPaths(safePaths);
+  }, [scanResult]);
+
   const confirmCleanSelected = useCallback(() => {
     const paths = Array.from(selectedCleanupPaths);
     if (paths.length === 0) {
       return;
     }
-    setOperationState("loading");
-    setMessage("Deleting selected items...");
-    void invoke<CleanResult>("clean_selected", { paths })
-      .then((result) => {
-        setSummary({ kind: "clean", result });
-        setCleanupTargets([]);
-        setSelectedCleanupPaths(new Set());
-        setOperationState("success");
-        setMessage("Done");
-        void refreshStatus();
-      })
-      .catch((error) => {
-        setOperationState("error");
-        setMessage(errorMessage(error));
-      });
-  }, [refreshStatus, selectedCleanupPaths]);
+    const totalBytes = paths.reduce((sum, path) => {
+      const entry = scanResult?.sections
+        .flatMap((section) => section.categories)
+        .flatMap((category) => category.items)
+        .find((item) => item.path === path);
+      return sum + (entry?.freed ?? 0);
+    }, 0);
+    setConfirmation({
+      title: "确认删除所选项",
+      description: `共 ${paths.length} 项 · ${formatBytes(totalBytes)}。该操作不可恢复，请确认。`,
+      confirmLabel: "确认删除",
+      destructive: true,
+      action: async () => {
+        setOperationState("loading");
+        setMessage("正在删除...");
+        try {
+          const result = await invoke<CleanResult>("clean_selected", { paths });
+          setLastCleanResult(result);
+          setOperationState("success");
+          setMessage(`已释放 ${formatBytes(result.freed_total)}`);
+          setSelectedCleanupPaths(new Set());
+          handleScan();
+          void refreshStatus();
+        } catch (error) {
+          setOperationState("error");
+          setMessage(errorMessage(error));
+        }
+      },
+    });
+  }, [handleScan, refreshStatus, scanResult, selectedCleanupPaths]);
 
   const handleOptimize = useCallback(() => {
-    requestAction(
-      "执行系统优化",
-      "会执行安全维护任务，例如刷新系统缓存和文件系统状态。",
-      "开始优化",
-      () => invoke<OptimizeResult>("optimize"),
-      (result) => ({ kind: "optimize", result }),
-    );
-  }, [requestAction]);
+    setConfirmation({
+      title: "执行系统优化",
+      description: "会执行 purge 等系统维护任务，刷新缓存与文件系统状态。",
+      confirmLabel: "开始优化",
+      action: async () => {
+        setOperationState("loading");
+        setMessage("Working...");
+        try {
+          const result = await invoke<OptimizeResult>("optimize");
+          setOperationState("success");
+          setMessage(`已执行 ${result.tasks.length} 个优化任务`);
+          void refreshStatus();
+        } catch (error) {
+          setOperationState("error");
+          setMessage(errorMessage(error));
+        }
+      },
+    });
+  }, [refreshStatus]);
 
   const handleAnalyse = useCallback(async () => {
     await setPanelAutoHide(false);
@@ -961,7 +1293,7 @@ export default function App() {
 
   return (
     <main className="h-screen w-screen overflow-hidden bg-transparent text-white">
-      <div className="cachebar-shell flex h-full flex-col gap-3 rounded-[28px] bg-slate-900/85 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-2xl">
+      <div className="cachebar-shell flex h-full flex-col gap-3 overflow-hidden rounded-[28px] bg-slate-900/85 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-2xl">
         <header className="flex items-start justify-between gap-2">
           <div>
             <h1 className="text-lg font-black text-white">CacheBar</h1>
@@ -974,29 +1306,26 @@ export default function App() {
         <TabBar active={activeTab} onChange={setActiveTab} />
 
         <div className="min-h-0 flex-1 overflow-hidden">
-          {activeTab === "overview" ? <OverviewTab status={status} cpuHistory={cpuHistory} onFreeUp={handleOptimize} /> : null}
+          {activeTab === "overview" ? (
+            <div className="h-full overflow-y-auto">
+              <OverviewTab status={status} cpuHistory={cpuHistory} hwEnabled={settings.enableHwMetrics} onFreeUp={handleOptimize} />
+            </div>
+          ) : null}
           {activeTab === "cleanup" ? (
             <CleanupTab
               busy={busy}
               message={message}
-              summary={summary}
               operationState={operationState}
-              onScan={handleClean}
-              cleanupTargets={cleanupTargets}
+              scanResult={scanResult}
+              lastCleanResult={lastCleanResult}
               selectedPaths={selectedCleanupPaths}
-              onSelectAll={() => setSelectedCleanupPaths(new Set(cleanupTargets.map((entry) => entry.path)))}
+              expandedCategoryIds={expandedCategoryIds}
+              onScan={handleScan}
+              onTogglePath={handleTogglePath}
+              onToggleCategory={handleToggleCategory}
+              onToggleExpand={handleToggleExpand}
+              onSelectAll={selectAllSafe}
               onSelectNone={() => setSelectedCleanupPaths(new Set())}
-              onTogglePath={(path) =>
-                setSelectedCleanupPaths((current) => {
-                  const next = new Set(current);
-                  if (next.has(path)) {
-                    next.delete(path);
-                  } else {
-                    next.add(path);
-                  }
-                  return next;
-                })
-              }
               onConfirmClean={confirmCleanSelected}
             />
           ) : null}
@@ -1014,6 +1343,7 @@ export default function App() {
           open={settingsOpen}
           settings={settings}
           busy={busy}
+          hwEnabledRuntime={hwEnabledRuntime}
           onClose={() => setSettingsOpen(false)}
           onSave={(next) => {
             setSettings(next);
@@ -1029,6 +1359,7 @@ export default function App() {
           title={confirmation?.title ?? ""}
           description={confirmation?.description ?? ""}
           confirmLabel={confirmation?.confirmLabel ?? "确认"}
+          destructive={confirmation?.destructive}
           busy={busy}
           onCancel={() => setConfirmation(null)}
           onConfirm={() => {

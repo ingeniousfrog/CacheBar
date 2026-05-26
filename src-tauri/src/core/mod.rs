@@ -84,6 +84,32 @@ pub struct CleanFailure {
 pub struct CleanResult {
     pub removed: Vec<CleanEntry>,
     pub skipped: Vec<CleanFailure>,
+    pub freed_total: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanCategory {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub risk: String,
+    pub roots: Vec<String>,
+    pub items: Vec<CleanEntry>,
+    pub total_freed: u64,
+    pub item_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanSection {
+    pub name: String,
+    pub categories: Vec<CleanCategory>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanScanResult {
+    pub sections: Vec<CleanSection>,
+    pub total_freed: u64,
+    pub total_items: usize,
 }
 
 #[derive(Debug, Serialize)]

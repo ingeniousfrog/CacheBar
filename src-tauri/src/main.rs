@@ -1,8 +1,9 @@
 mod core;
 
 use core::{
-    AnalysisNode, CleanEntry, CleanResult, OptimizeResult, StatusSnapshot, UninstallResult,
+    AnalysisNode, CleanResult, CleanScanResult, OptimizeResult, StatusSnapshot, UninstallResult,
 };
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -18,8 +19,29 @@ fn status() -> Result<StatusSnapshot, String> {
 }
 
 #[tauri::command]
-fn scan_clean_targets() -> Result<Vec<CleanEntry>, String> {
+fn scan_clean_targets() -> Result<CleanScanResult, String> {
     core::clean::scan_clean_targets()
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(target_os = "linux")]
+    let program = "xdg-open";
+    #[cfg(target_os = "windows")]
+    let program = "cmd";
+
+    let mut command = Command::new(program);
+    #[cfg(target_os = "windows")]
+    command.args(["/C", "start", "", &url]);
+    #[cfg(not(target_os = "windows"))]
+    command.arg(&url);
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Unable to open URL: {err}"))
 }
 
 #[tauri::command]
@@ -106,7 +128,8 @@ fn main() {
             optimize,
             analyse,
             quit_app,
-            set_panel_auto_hide
+            set_panel_auto_hide,
+            open_url
         ])
         .run(tauri::generate_context!())
         .expect("failed to run CacheBar");
