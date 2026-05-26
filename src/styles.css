@@ -38,6 +38,7 @@ input {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: rgba(191, 219, 254, 0.36) transparent;
+  clip-path: inset(0 round 28px);
 }
 
 .cachebar-shell::-webkit-scrollbar {

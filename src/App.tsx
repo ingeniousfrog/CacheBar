@@ -182,14 +182,14 @@ function Meter({ value, tone }: { value: number; tone: "green" | "amber" | "blue
   }[tone];
 
   return (
-    <div className="h-1.5 overflow-hidden rounded-full bg-white/15">
+    <div className="h-1.5 overflow-hidden rounded-full bg-slate-700/70">
       <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(Math.max(value, 0), 100)}%` }} />
     </div>
   );
 }
 
 function GlassCard({ className = "", children }: { className?: string; children: ReactNode }) {
-  return <div className={`rounded-2xl bg-white/10 p-3 backdrop-blur-md ${className}`}>{children}</div>;
+  return <div className={`rounded-2xl bg-slate-800/70 p-3 ring-1 ring-white/5 ${className}`}>{children}</div>;
 }
 
 function CpuAreaChart({ samples }: { samples: CpuSample[] }) {
@@ -199,7 +199,7 @@ function CpuAreaChart({ samples }: { samples: CpuSample[] }) {
 
   if (samples.length < 2) {
     return (
-      <div className="flex h-[72px] items-center justify-center rounded-xl bg-black/20 text-[11px] font-semibold text-slate-400">
+      <div className="flex h-[72px] items-center justify-center rounded-xl bg-slate-950/60 text-[11px] font-semibold text-slate-400">
         采集中…
       </div>
     );
@@ -225,7 +225,7 @@ function CpuAreaChart({ samples }: { samples: CpuSample[] }) {
   const totalValues = samples.map((sample) => sample[0] + sample[1]);
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-[72px] w-full rounded-xl bg-black/20" preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${width} ${height}`} className="h-[72px] w-full rounded-xl bg-slate-950/60" preserveAspectRatio="none">
       <path d={buildArea(totalValues)} fill="rgba(248,113,113,0.55)" />
       <path d={buildArea(systemValues)} fill="rgba(56,189,248,0.65)" />
       <path d={buildArea(userValues)} fill="rgba(59,130,246,0.85)" />
@@ -241,7 +241,7 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (tab: TabId) =>
   ];
 
   return (
-    <nav className="flex gap-1 rounded-2xl bg-black/25 p-1">
+    <nav className="flex gap-1 rounded-2xl bg-slate-950/60 p-1 ring-1 ring-white/5">
       {tabs.map((tab) => {
         const isActive = active === tab.id;
         return (
@@ -250,7 +250,7 @@ function TabBar({ active, onChange }: { active: TabId; onChange: (tab: TabId) =>
             type="button"
             onClick={() => onChange(tab.id)}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-bold transition ${
-              isActive ? "bg-sky-500 text-white shadow-sm" : "text-slate-300 hover:bg-white/10"
+              isActive ? "bg-sky-500 text-white shadow" : "text-slate-300 hover:bg-white/10"
             }`}
           >
             <span className="text-sm">{tab.icon}</span>
@@ -653,7 +653,7 @@ function CleanupTab({
           <div className="text-xs font-bold text-slate-200">
             已选 {selectedPaths.size} 项 · {formatBytes(selectedTotal)}
           </div>
-          <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-black/20 p-2">
+          <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-950/60 p-2">
             {Object.entries(groupedEntries).map(([category, items]) => (
               <div key={category} className="mb-3 last:mb-0">
                 <div className="mb-1 text-[11px] font-black uppercase text-slate-400">{category}</div>
@@ -709,7 +709,7 @@ function AnalyseTab({
         {busy ? "扫描中..." : nodes.length > 0 ? "重新选择文件夹" : "选择文件夹分析"}
       </button>
       {message ? <p className="text-xs font-semibold text-slate-300">{message}</p> : null}
-      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-black/20 p-2">
+      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-950/60 p-2">
         {nodes.length > 0 ? <AnalysisTree nodes={nodes} /> : <div className="py-8 text-center text-xs text-slate-400">还没有选择文件夹</div>}
       </div>
     </div>
@@ -960,12 +960,12 @@ export default function App() {
   }, [status?.collected_at]);
 
   return (
-    <main className="h-screen overflow-hidden bg-transparent p-1 text-white drop-shadow-2xl">
-      <div className="cachebar-shell flex h-full flex-col gap-3 rounded-3xl border border-white/10 bg-white/8 p-4 backdrop-blur-2xl">
+    <main className="h-screen w-screen overflow-hidden bg-transparent text-white">
+      <div className="cachebar-shell flex h-full flex-col gap-3 rounded-[28px] bg-slate-900/85 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-2xl">
         <header className="flex items-start justify-between gap-2">
           <div>
             <h1 className="text-lg font-black text-white">CacheBar</h1>
-            <p className="text-[11px] font-semibold text-slate-300">
+            <p className="text-[11px] font-semibold text-slate-400">
               {status ? `${status.platform} · uptime ${status.uptime}` : "Gathering status..."} · {updatedLabel}
             </p>
           </div>
