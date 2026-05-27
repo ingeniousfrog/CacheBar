@@ -1,11 +1,29 @@
-<p align="center">
-  <img src="src-tauri/icons/icon.png" alt="CacheBar logo" width="48" height="48" style="vertical-align: middle; border-radius: 10px;" />
-  <strong style="font-size: 1.75rem; font-weight: 700; vertical-align: middle;"> CacheBar</strong>
-</p>
+<div align="center">
+  <table cellpadding="0" cellspacing="0" style="border: none; margin: 0 auto;">
+    <tr>
+      <td valign="middle" style="padding-right: 10px;">
+        <img
+          src="src-tauri/icons/icon.png"
+          alt="CacheBar logo"
+          width="32"
+          height="32"
+          style="display: block; border-radius: 8px;"
+        />
+      </td>
+      <td valign="middle">
+        <span style="font-size: 32px; font-weight: 700; line-height: 32px; display: block;">CacheBar</span>
+      </td>
+    </tr>
+  </table>
+</div>
 
 <p align="center">
   A lightweight macOS menu bar utility for real-time system monitoring and safe cache cleanup.<br />
   Built with Tauri 2 (Rust) + React + Tailwind CSS.
+</p>
+
+<p align="center">
+  <img src="docs/hero.png" alt="CacheBar — Overview and Cleanup panels" width="720" />
 </p>
 
 Click the menu bar icon to open a rounded, translucent panel: **Overview** shows CPU, disk, memory, network, and top processes; **Cleanup** scans categorized safe-to-remove caches with review before delete.
