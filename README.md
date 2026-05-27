@@ -1,21 +1,13 @@
-<div align="center">
-  <table cellpadding="0" cellspacing="0" style="border: none; margin: 0 auto;">
-    <tr>
-      <td valign="middle" style="padding-right: 10px;">
-        <img
-          src="src-tauri/icons/icon.png"
-          alt="CacheBar logo"
-          width="32"
-          height="32"
-          style="display: block; border-radius: 8px;"
-        />
-      </td>
-      <td valign="middle">
-        <span style="font-size: 32px; font-weight: 700; line-height: 32px; display: block;">CacheBar</span>
-      </td>
-    </tr>
-  </table>
-</div>
+<h1 align="center">
+  <img
+    src="src-tauri/icons/icon.png"
+    alt=""
+    width="32"
+    height="32"
+    style="vertical-align: middle; border-radius: 8px; margin-right: 10px;"
+  />
+  CacheBar
+</h1>
 
 <p align="center">
   A lightweight macOS menu bar utility for real-time system monitoring and safe cache cleanup.<br />
