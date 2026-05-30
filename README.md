@@ -36,9 +36,37 @@ Click the menu bar icon to open a rounded, translucent panel: **Overview** shows
 
 ## Install (macOS)
 
-### Download DMG (recommended)
+Requires **macOS 11+** on **Apple Silicon** (`arm64`) for the pre-built DMG. Intel Macs need a separate build; see [Building a DMG](#building-a-dmg).
 
-A pre-built **Apple Silicon** (`aarch64`) DMG is hosted on Baidu Netdisk:
+### Homebrew (tap)
+
+Tap repo: [ingeniousfrog/homebrew-tap](https://github.com/ingeniousfrog/homebrew-tap)
+
+```bash
+brew tap ingeniousfrog/tap
+brew install --cask cachebar
+```
+
+After each release, update the tap’s `Casks/cachebar.rb` (`version`, `sha256`) — see [homebrew-tap/README.md](homebrew-tap/README.md) and [docs/RELEASE.md](docs/RELEASE.md).
+
+### One-line install script
+
+Downloads the DMG from [GitHub Releases](https://github.com/ingeniousfrog/CacheBar/releases) and installs **CacheBar.app** to `/Applications`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ingeniousfrog/CacheBar/main/scripts/install.sh | bash
+```
+
+Pin a version: `CACHEBAR_VERSION=0.1.0 curl -fsSL https://raw.githubusercontent.com/ingeniousfrog/CacheBar/main/scripts/install.sh | bash`  
+Or run locally: `bash scripts/install.sh`
+
+### Download DMG manually
+
+**GitHub Releases** (used by the script and Homebrew cask):
+
+- [Releases](https://github.com/ingeniousfrog/CacheBar/releases) → download `CacheBar_0.1.0_aarch64.dmg` (or the latest asset for your version).
+
+**Baidu Netdisk** (mirror):
 
 | | |
 | --- | --- |
@@ -47,14 +75,14 @@ A pre-built **Apple Silicon** (`aarch64`) DMG is hosted on Baidu Netdisk:
 
 **Steps**
 
-1. Open the link above and download `CacheBar_0.1.0_aarch64.dmg` (or the latest DMG in the share).
+1. Download the DMG (GitHub or Baidu).
 2. Double-click the DMG, then drag **CacheBar.app** into **Applications**.
 3. **First launch** — if macOS shows an unidentified-developer warning:
    - Open **System Settings → Privacy & Security**, click **Open Anyway**, or
    - Right-click **CacheBar.app** in Applications → **Open**.
-4. Click the **CacheBar** icon in the menu bar (rounded app icon) to show or hide the panel.
+4. Click the **CacheBar** icon in the menu bar to show or hide the panel.
 
-> Requires **macOS 11+** on Apple Silicon. Intel Macs need a separate build (`x86_64`); see [Building a DMG](#building-a-dmg) below.
+> **Maintainers:** upload each DMG to GitHub Releases before users run the install script or Homebrew cask. See [docs/RELEASE.md](docs/RELEASE.md).
 
 ### Build from source
 
