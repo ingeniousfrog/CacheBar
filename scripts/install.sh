@@ -40,12 +40,18 @@ if ! curl -fsSL "${URL}" -o "${tmpdir}/${DMG_NAME}"; then
 fi
 
 echo "→ Mounting DMG…"
-mount_output="$(hdiutil attach "${tmpdir}/${DMG_NAME}" -nobrowse -quiet)"
-mount_point="$(echo "${mount_output}" | tail -1 | awk '{print $NF}')"
+mount_point="${tmpdir}/mnt"
+mkdir -p "${mount_point}"
+hdiutil attach "${tmpdir}/${DMG_NAME}" -nobrowse -quiet -mountpoint "${mount_point}" >/dev/null
 
 app_src="${mount_point}/${APP_NAME}.app"
 if [[ ! -d "${app_src}" ]]; then
+  app_src="$(find "${mount_point}" -maxdepth 2 -name "*.app" -type d | head -1)"
+fi
+if [[ -z "${app_src}" ]] || [[ ! -d "${app_src}" ]]; then
   echo "${APP_NAME}.app not found inside the DMG." >&2
+  echo "Contents of mounted volume:" >&2
+  ls -la "${mount_point}" >&2 || true
   exit 1
 fi
 
